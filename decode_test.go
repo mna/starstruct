@@ -45,7 +45,16 @@ func TestFromStarlark(t *testing.T) {
 		StrctStr
 		StrctBool `starlark:"bools"`
 	}
+	type StrctList struct {
+		I        []int
+		S        []string
+		Sptr     []*string
+		PtrIptr  *[]*int
+		Strct    []StrctBool
+		StrctPtr []*StrctBool
+	}
 	type M = map[string]starlark.Value
+
 	dict := func(m M) *starlark.Dict {
 		d := starlark.NewDict(len(m))
 		for k, v := range m {
@@ -55,6 +64,10 @@ func TestFromStarlark(t *testing.T) {
 		}
 		return d
 	}
+	list := func(vs ...starlark.Value) *starlark.List {
+		return starlark.NewList(vs)
+	}
+
 	truev, falsev := true, false
 	tooBig := big.NewInt(1).Add(big.NewInt(1).SetUint64(math.MaxUint64), big.NewInt(1))
 	sptr := func(s string) *string { return &s }
@@ -207,6 +220,17 @@ func TestFromStarlark(t *testing.T) {
 		{"embedded ptr prefixed b", M{"bools": dict(M{"B": starlark.Bool(true)})}, &StrctDict{}, StrctDict{StrctBool: StrctBool{B: true}}, ``},
 		{"embedded ptr prefixed *bool", M{"bools": dict(M{"bptr": starlark.Bool(true)})}, &StrctDict{}, StrctDict{StrctBool: StrctBool{Bptr: &truev}}, ``},
 		{"embedded ptr prefixed **bool", M{"bools": dict(M{"b2ptr": starlark.Bool(true)})}, &StrctDict{}, nil, `cannot assign Bool to unsupported field type at StrctBool.B2ptr: **bool`},
+
+		{"list int", M{"i": list(starlark.MakeInt(1), starlark.MakeInt(2), starlark.MakeInt(3))}, &StrctList{}, StrctList{I: []int{1, 2, 3}}, ``},
+		{"list *[]*int", M{"ptriptr": list(starlark.MakeInt(1), starlark.MakeInt(2), starlark.MakeInt(3))}, &StrctList{}, StrctList{PtrIptr: &[]*int{iptr(1), iptr(2), iptr(3)}}, ``},
+		{"list string", M{"s": list(starlark.String("a"), starlark.String("b"))}, &StrctList{}, StrctList{S: []string{"a", "b"}}, ``},
+		{"list empty *string", M{"sptr": list()}, &StrctList{}, StrctList{Sptr: []*string{}}, ``},
+		{"list empty *[]*int", M{"ptriptr": list()}, &StrctList{}, StrctList{PtrIptr: &[]*int{}}, ``},
+		{"list StrctBool", M{"strct": list(dict(M{"B": starlark.Bool(true)}), dict(M{"Bptr": starlark.Bool(true)}))}, &StrctList{}, StrctList{Strct: []StrctBool{{B: true}, {Bptr: &truev}}}, ``},
+		{"list *StrctBool", M{"strctptr": list(dict(M{"B": starlark.Bool(true)}), dict(M{"Bptr": starlark.Bool(false)}))}, &StrctList{}, StrctList{StrctPtr: []*StrctBool{{B: true}, {Bptr: &falsev}}}, ``},
+		{"list mixed values", M{"s": list(starlark.String("a"), starlark.MakeInt(1))}, &StrctList{}, nil, `cannot assign Int to unsupported field type at S[1]: string`},
+		{"list None *StrctBool", M{"strctptr": list(starlark.None, dict(M{"Bptr": starlark.Bool(true)}))}, &StrctList{}, StrctList{StrctPtr: []*StrctBool{nil, {Bptr: &truev}}}, ``},
+		{"list None *string", M{"sptr": list(starlark.None, starlark.None)}, &StrctList{}, StrctList{Sptr: []*string{nil, nil}}, ``},
 	}
 
 	for _, c := range cases {

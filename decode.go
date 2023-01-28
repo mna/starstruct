@@ -9,8 +9,8 @@ import (
 	"go.starlark.net/starlark"
 )
 
-// FromStarlark loads the starlark values from vals into a destination Go struct.
-// It supports the following data types from Starlark to Go:
+// FromStarlark loads the starlark values from vals into a destination Go
+// struct. It supports the following data types from Starlark to Go:
 //   - NoneType => nil (Go field must be a pointer)
 //   - Bool     => bool
 //   - Bytes    => []byte or string
@@ -18,6 +18,8 @@ import (
 //   - Float    => float32 or float64
 //   - Int      => int, uint, and any sized (u)int if it fits
 //   - Dict     => struct
+//   - List     => slice of any supported Go type
+//   - Tuple    => slice of any supported Go type
 //
 // It panics if dst is not a non-nil pointer to an addressable and settable
 // struct. If a target field does not exist in the starlark dictionary, it is
@@ -93,55 +95,62 @@ func walkStruct(path string, strct reflect.Value, vals map[string]starlark.Value
 		// at this point, the struct field has a matching starlark value, so it
 		// will either set it or return an error.
 		didSet = true
-
-		switch v := matchingVal.(type) {
-		case starlark.NoneType:
-			if err := setFieldNone(path, fld); err != nil {
-				return didSet, err
-			}
-
-		case starlark.Bool:
-			if err := setFieldBool(path, fld, bool(v)); err != nil {
-				return didSet, err
-			}
-
-		case starlark.Bytes:
-			if err := setFieldBytes(path, fld, string(v)); err != nil {
-				return didSet, err
-			}
-
-		case starlark.String:
-			if err := setFieldString(path, fld, string(v)); err != nil {
-				return didSet, err
-			}
-
-		case starlark.Int:
-			if err := setFieldInt(path, fld, v); err != nil {
-				return didSet, err
-			}
-
-		case starlark.Float:
-			if err := setFieldFloat(path, fld, v); err != nil {
-				return didSet, err
-			}
-
-		case *starlark.Dict:
-			ok, err := setFieldDict(path, fld, indexDictItems(v.Items()))
-			if err != nil {
-				return didSet, err
-			}
-			if ok {
-				didSet = true
-			}
-
-		default:
-			if v == nil {
-				return didSet, fmt.Errorf("nil starlark Value at %s", path)
-			}
-			return didSet, fmt.Errorf("unsupported starlark type %s at %s", v.Type(), path)
+		if err := fromStarlarkValue(path, matchingVal, fld); err != nil {
+			return didSet, err
 		}
 	}
 	return didSet, nil
+}
+
+func fromStarlarkValue(path string, starVal starlark.Value, dst reflect.Value) error {
+	switch v := starVal.(type) {
+	case starlark.NoneType:
+		if err := setFieldNone(path, dst); err != nil {
+			return err
+		}
+
+	case starlark.Bool:
+		if err := setFieldBool(path, dst, bool(v)); err != nil {
+			return err
+		}
+
+	case starlark.Bytes:
+		if err := setFieldBytes(path, dst, string(v)); err != nil {
+			return err
+		}
+
+	case starlark.String:
+		if err := setFieldString(path, dst, string(v)); err != nil {
+			return err
+		}
+
+	case starlark.Int:
+		if err := setFieldInt(path, dst, v); err != nil {
+			return err
+		}
+
+	case starlark.Float:
+		if err := setFieldFloat(path, dst, v); err != nil {
+			return err
+		}
+
+	case *starlark.Dict:
+		if _, err := setFieldDict(path, dst, indexDictItems(v.Items())); err != nil {
+			return err
+		}
+
+	case *starlark.List:
+		if err := setFieldList(path, dst, v); err != nil {
+			return err
+		}
+
+	default:
+		if v == nil {
+			return fmt.Errorf("nil starlark Value at %s", path)
+		}
+		return fmt.Errorf("unsupported starlark type %s at %s", v.Type(), path)
+	}
+	return nil
 }
 
 func setFieldNone(path string, fld reflect.Value) error {
@@ -334,6 +343,54 @@ func setFieldDict(path string, fld reflect.Value, dict map[string]starlark.Value
 		ptrToStrct.Set(fld.Addr())
 	}
 	return didSet, err
+}
+
+func setFieldList(path string, fld reflect.Value, list *starlark.List) error {
+	// support a single-level of indirection, in case the value may be None
+	if fld.Kind() == reflect.Pointer {
+		ptrToTyp := fld.Type().Elem()
+
+		// must be a slice
+		if ptrToTyp.Kind() != reflect.Slice {
+			return fmt.Errorf("cannot assign List to unsupported field type at %s: %s", path, fld.Type())
+		}
+
+		if fld.IsNil() {
+			// allocate the pointer to slice value
+			fld.Set(reflect.New(ptrToTyp))
+		}
+		fld = fld.Elem()
+	}
+
+	if fld.Kind() != reflect.Slice {
+		return fmt.Errorf("cannot assign List to unsupported field type at %s: %s", path, fld.Type())
+	}
+	elemTyp := fld.Type().Elem()
+
+	count := list.Len()
+	if count == 0 {
+		// special-case to behave the same as JSON Unmarshal: to unmarshal an empty
+		// JSON array into a slice, Unmarshal replaces the slice with a new empty
+		// slice.
+		fld.Set(reflect.MakeSlice(reflect.SliceOf(elemTyp), 0, 0))
+		return nil
+	}
+
+	if count > fld.Cap() {
+		// replace the slice with one that has the sufficient capacity
+		fld.Set(reflect.MakeSlice(reflect.SliceOf(elemTyp), 0, count))
+	} else {
+		fld.SetLen(0)
+	}
+	for i := 0; i < count; i++ {
+		newVal := list.Index(i)
+		newElem := reflect.New(elemTyp).Elem()
+		if err := fromStarlarkValue(fmt.Sprintf("%s[%d]", path, i), newVal, newElem); err != nil {
+			return err
+		}
+		fld.Set(reflect.Append(fld, newElem))
+	}
+	return nil
 }
 
 func setFieldBytes(path string, fld reflect.Value, s string) error {
