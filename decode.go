@@ -144,6 +144,11 @@ func fromStarlarkValue(path string, starVal starlark.Value, dst reflect.Value) e
 			return err
 		}
 
+	case starlark.Tuple:
+		if err := setFieldTuple(path, dst, v); err != nil {
+			return err
+		}
+
 	default:
 		if v == nil {
 			return fmt.Errorf("nil starlark Value at %s", path)
@@ -345,7 +350,21 @@ func setFieldDict(path string, fld reflect.Value, dict map[string]starlark.Value
 	return didSet, err
 }
 
+type lister interface {
+	starlark.Value
+	Index(i int) starlark.Value
+	Len() int
+}
+
 func setFieldList(path string, fld reflect.Value, list *starlark.List) error {
+	return setFieldListOrTuple(path, "List", fld, list)
+}
+
+func setFieldTuple(path string, fld reflect.Value, tup starlark.Tuple) error {
+	return setFieldListOrTuple(path, "Tuple", fld, tup)
+}
+
+func setFieldListOrTuple(path, label string, fld reflect.Value, list lister) error {
 	// support a single-level of indirection, in case the value may be None
 	if fld.Kind() == reflect.Pointer {
 		ptrToTyp := fld.Type().Elem()

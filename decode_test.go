@@ -67,6 +67,9 @@ func TestFromStarlark(t *testing.T) {
 	list := func(vs ...starlark.Value) *starlark.List {
 		return starlark.NewList(vs)
 	}
+	tup := func(vs ...starlark.Value) starlark.Tuple {
+		return starlark.Tuple(vs)
+	}
 
 	truev, falsev := true, false
 	tooBig := big.NewInt(1).Add(big.NewInt(1).SetUint64(math.MaxUint64), big.NewInt(1))
@@ -231,6 +234,10 @@ func TestFromStarlark(t *testing.T) {
 		{"list mixed values", M{"s": list(starlark.String("a"), starlark.MakeInt(1))}, &StrctList{}, nil, `cannot assign Int to unsupported field type at S[1]: string`},
 		{"list None *StrctBool", M{"strctptr": list(starlark.None, dict(M{"Bptr": starlark.Bool(true)}))}, &StrctList{}, StrctList{StrctPtr: []*StrctBool{nil, {Bptr: &truev}}}, ``},
 		{"list None *string", M{"sptr": list(starlark.None, starlark.None)}, &StrctList{}, StrctList{Sptr: []*string{nil, nil}}, ``},
+
+		{"tuple int", M{"i": tup(starlark.MakeInt(1), starlark.MakeInt(2), starlark.MakeInt(3))}, &StrctList{}, StrctList{I: []int{1, 2, 3}}, ``},
+		{"tuple string", M{"s": tup(starlark.String("a"), starlark.String("b"), starlark.String("c"))}, &StrctList{}, StrctList{S: []string{"a", "b", "c"}}, ``},
+		{"tuple mixed values", M{"s": tup(starlark.String("a"), starlark.MakeInt(1))}, &StrctList{}, nil, `cannot assign Int to unsupported field type at S[1]: string`},
 	}
 
 	for _, c := range cases {
