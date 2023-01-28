@@ -37,10 +37,11 @@ func FromStarlark(vals starlark.StringDict, dst any) error {
 	if !rval.CanAddr() || !rval.CanSet() {
 		panic(fmt.Sprintf("destination value is a pointer to an unaddressable or unsettable struct: pointer to kind: %s, type: %s", rval.Kind(), rval.Type().Name()))
 	}
-	return walkStruct("", rval, vals)
+	_, err := walkStruct("", rval, vals)
+	return err
 }
 
-func walkStruct(path string, strct reflect.Value, vals map[string]starlark.Value) error {
+func walkStruct(path string, strct reflect.Value, vals map[string]starlark.Value) (didSet bool, err error) {
 	strctTyp := strct.Type()
 	count := strctTyp.NumField()
 	for i := 0; i < count; i++ {
@@ -65,8 +66,12 @@ func walkStruct(path string, strct reflect.Value, vals map[string]starlark.Value
 		// struct with the current vals.
 		if nm == "" {
 			if fldTyp.Anonymous {
-				if err := setFieldDict(path, fld, vals); err != nil {
-					return err
+				ok, err := setFieldDict(path, fld, vals)
+				if err != nil {
+					return didSet, err
+				}
+				if ok {
+					didSet = true
 				}
 				continue
 			}
@@ -85,50 +90,58 @@ func walkStruct(path string, strct reflect.Value, vals map[string]starlark.Value
 			}
 		}
 
+		// at this point, the struct field has a matching starlark value, so it
+		// will either set it or return an error.
+		didSet = true
+
 		switch v := matchingVal.(type) {
 		case starlark.NoneType:
 			if err := setFieldNone(path, fld); err != nil {
-				return err
+				return didSet, err
 			}
 
 		case starlark.Bool:
 			if err := setFieldBool(path, fld, bool(v)); err != nil {
-				return err
+				return didSet, err
 			}
 
 		case starlark.Bytes:
 			if err := setFieldBytes(path, fld, string(v)); err != nil {
-				return err
+				return didSet, err
 			}
 
 		case starlark.String:
 			if err := setFieldString(path, fld, string(v)); err != nil {
-				return err
+				return didSet, err
 			}
 
 		case starlark.Int:
 			if err := setFieldInt(path, fld, v); err != nil {
-				return err
+				return didSet, err
 			}
 
 		case starlark.Float:
 			if err := setFieldFloat(path, fld, v); err != nil {
-				return err
+				return didSet, err
 			}
 
 		case *starlark.Dict:
-			if err := setFieldDict(path, fld, indexDictItems(v.Items())); err != nil {
-				return err
+			ok, err := setFieldDict(path, fld, indexDictItems(v.Items()))
+			if err != nil {
+				return didSet, err
+			}
+			if ok {
+				didSet = true
 			}
 
 		default:
 			if v == nil {
-				return fmt.Errorf("nil starlark Value at %s", path)
+				return didSet, fmt.Errorf("nil starlark Value at %s", path)
 			}
-			return fmt.Errorf("unsupported starlark type %s at %s", v.Type(), path)
+			return didSet, fmt.Errorf("unsupported starlark type %s at %s", v.Type(), path)
 		}
 	}
-	return nil
+	return didSet, nil
 }
 
 func setFieldNone(path string, fld reflect.Value) error {
@@ -293,26 +306,34 @@ func setFieldFloat(path string, fld reflect.Value, f starlark.Float) error {
 	return nil
 }
 
-func setFieldDict(path string, fld reflect.Value, dict map[string]starlark.Value) error {
+func setFieldDict(path string, fld reflect.Value, dict map[string]starlark.Value) (didSet bool, err error) {
+	var ptrToStrct reflect.Value
+
 	// support a single-level of indirection, in case the value may be None
 	if fld.Kind() == reflect.Pointer {
+		ptrToStrct = fld
 		ptrToTyp := fld.Type().Elem()
 		// must be a struct
 		if ptrToTyp.Kind() != reflect.Struct {
-			return fmt.Errorf("cannot assign Dict to unsupported field type at %s: %s", path, fld.Type())
+			return didSet, fmt.Errorf("cannot assign Dict to unsupported field type at %s: %s", path, fld.Type())
 		}
 
 		if fld.IsNil() {
-			// allocate the struct value
-			fld.Set(reflect.New(ptrToTyp))
+			// allocate the struct value, but do not set it yet on the pointer, will
+			// only set it if something was set on the struct.
+			fld = reflect.New(ptrToTyp)
 		}
 		fld = fld.Elem()
 	}
 
 	if fld.Kind() != reflect.Struct {
-		return fmt.Errorf("cannot assign Dict to unsupported field type at %s: %s", path, fld.Type())
+		return didSet, fmt.Errorf("cannot assign Dict to unsupported field type at %s: %s", path, fld.Type())
 	}
-	return walkStruct(path, fld, dict)
+	didSet, err = walkStruct(path, fld, dict)
+	if didSet && ptrToStrct.Kind() == reflect.Pointer {
+		ptrToStrct.Set(fld.Addr())
+	}
+	return didSet, err
 }
 
 func setFieldBytes(path string, fld reflect.Value, s string) error {

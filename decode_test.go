@@ -200,13 +200,12 @@ func TestFromStarlark(t *testing.T) {
 
 		{"embedded ptr int", M{"i": starlark.MakeInt(1)}, &StrctDict{}, StrctDict{StrctNums: &StrctNums{I: 1}}, ``},
 		{"embedded ptr *int", M{"iptr": starlark.MakeInt(1)}, &StrctDict{}, StrctDict{StrctNums: &StrctNums{Iptr: iptr(1)}}, ``},
-		// TODO: it is a bug that StrctNums gets allocated and set, as none of its fields are touched
-		{"embedded ptr string", M{"s": starlark.String("abc")}, &StrctDict{}, StrctDict{StrctNums: &StrctNums{}, StrctStr: StrctStr{S: "abc"}}, ``},
-		{"embedded ptr *string", M{"sptr": starlark.String("abc")}, &StrctDict{}, StrctDict{StrctNums: &StrctNums{}, StrctStr: StrctStr{Sptr: sptr("abc")}}, ``},
+		{"embedded ptr string", M{"s": starlark.String("abc")}, &StrctDict{}, StrctDict{StrctStr: StrctStr{S: "abc"}}, ``},
+		{"embedded ptr *string", M{"sptr": starlark.String("abc")}, &StrctDict{}, StrctDict{StrctStr: StrctStr{Sptr: sptr("abc")}}, ``},
 		{"embedded ptr **string", M{"s2ptr": starlark.String("abc")}, &StrctDict{}, nil, `cannot assign String to unsupported field type at StrctStr.S2ptr: **string`},
-		{"embedded ptr unprefixed b", M{"B": starlark.Bool(true)}, &StrctDict{}, StrctDict{StrctNums: &StrctNums{}}, ``},
-		{"embedded ptr prefixed b", M{"bools": dict(M{"B": starlark.Bool(true)})}, &StrctDict{}, StrctDict{StrctNums: &StrctNums{}, StrctBool: StrctBool{B: true}}, ``},
-		{"embedded ptr prefixed *bool", M{"bools": dict(M{"bptr": starlark.Bool(true)})}, &StrctDict{}, StrctDict{StrctNums: &StrctNums{}, StrctBool: StrctBool{Bptr: &truev}}, ``},
+		{"embedded ptr unprefixed b", M{"B": starlark.Bool(true)}, &StrctDict{}, StrctDict{}, ``},
+		{"embedded ptr prefixed b", M{"bools": dict(M{"B": starlark.Bool(true)})}, &StrctDict{}, StrctDict{StrctBool: StrctBool{B: true}}, ``},
+		{"embedded ptr prefixed *bool", M{"bools": dict(M{"bptr": starlark.Bool(true)})}, &StrctDict{}, StrctDict{StrctBool: StrctBool{Bptr: &truev}}, ``},
 		{"embedded ptr prefixed **bool", M{"bools": dict(M{"b2ptr": starlark.Bool(true)})}, &StrctDict{}, nil, `cannot assign Bool to unsupported field type at StrctBool.B2ptr: **bool`},
 	}
 
