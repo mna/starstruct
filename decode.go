@@ -20,6 +20,7 @@ import (
 //   - Dict     => struct
 //   - List     => slice of any supported Go type
 //   - Tuple    => slice of any supported Go type
+//   - Set      => map[any supported Go type valid as map key]bool or slice
 //
 // It panics if dst is not a non-nil pointer to an addressable and settable
 // struct. If a target field does not exist in the starlark dictionary, it is
@@ -219,9 +220,7 @@ func setFieldInt(path string, fld reflect.Value, i starlark.Int) error {
 	return nil
 }
 
-var (
-	epsilon = float64(math.Nextafter32(1, 2) - 1)
-)
+var epsilon = float64(math.Nextafter32(1, 2) - 1)
 
 func setFieldFloat(path string, fld reflect.Value, f starlark.Float) error {
 	// support a single-level of indirection, in case the value may be None
