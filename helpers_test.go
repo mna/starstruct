@@ -40,6 +40,7 @@ func set(vs ...starlark.Value) *starlark.Set {
 func sptr(s string) *string  { return &s }
 func bsptr(s string) *[]byte { bs := []byte(s); return &bs }
 func iptr(i int) *int        { return &i }
+func uptr(i uint) *uint      { return &i }
 
 var (
 	truev, falsev = true, false

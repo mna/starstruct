@@ -125,6 +125,21 @@ func toStarlarkValue(path, dstName string, goVal reflect.Value, dst dictGetSette
 			return fmt.Errorf("failed to set key %s to Bool at %s: %w", dstName, path, err)
 		}
 
+	case goVal.Kind() == reflect.Float32 || goVal.Kind() == reflect.Float64:
+		if err := dst.SetKey(key, starlark.Float(goVal.Float())); err != nil {
+			return fmt.Errorf("failed to set key %s to Float at %s: %w", dstName, path, err)
+		}
+
+	case goVal.Kind() >= reflect.Int && goVal.Kind() <= reflect.Int64:
+		if err := dst.SetKey(key, starlark.MakeInt64(goVal.Int())); err != nil {
+			return fmt.Errorf("failed to set key %s to Int at %s: %w", dstName, path, err)
+		}
+
+	case goVal.Kind() >= reflect.Uint && goVal.Kind() <= reflect.Uintptr:
+		if err := dst.SetKey(key, starlark.MakeUint64(goVal.Uint())); err != nil {
+			return fmt.Errorf("failed to set key %s to Int at %s: %w", dstName, path, err)
+		}
+
 	default:
 		return fmt.Errorf("unsupported Go type %s at %s", goTyp, path)
 	}
