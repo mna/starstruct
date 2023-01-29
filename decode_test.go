@@ -53,6 +53,11 @@ func TestFromStarlark(t *testing.T) {
 		Strct    []StrctBool
 		StrctPtr []*StrctBool
 	}
+	type StrctSet struct {
+		M    map[string]bool
+		Sl   []string
+		Mptr *map[int]bool
+	}
 	type M = map[string]starlark.Value
 
 	dict := func(m M) *starlark.Dict {
@@ -70,6 +75,15 @@ func TestFromStarlark(t *testing.T) {
 	tup := func(vs ...starlark.Value) starlark.Tuple {
 		return starlark.Tuple(vs)
 	}
+	set := func(vs ...starlark.Value) *starlark.Set {
+		x := starlark.NewSet(len(vs))
+		for _, v := range vs {
+			if err := x.Insert(v); err != nil {
+				panic(err)
+			}
+		}
+		return x
+	}
 
 	truev, falsev := true, false
 	tooBig := big.NewInt(1).Add(big.NewInt(1).SetUint64(math.MaxUint64), big.NewInt(1))
@@ -84,9 +98,11 @@ func TestFromStarlark(t *testing.T) {
 		want any
 		err  string
 	}{
-		{"nil into *bool lower name", M{"bptr": starlark.None}, &StrctBool{}, StrctBool{Bptr: nil}, ""},
-		{"nil into *bool upper name", M{"Bptr": starlark.None}, &StrctBool{}, StrctBool{Bptr: nil}, ""},
-		{"nil into non-pointer", M{"I": starlark.None}, &StrctNums{}, nil, `cannot assign None to non-pointer field at I: int`},
+		{"None into *bool lower name", M{"bptr": starlark.None}, &StrctBool{}, StrctBool{Bptr: nil}, ""},
+		{"None into *bool upper name", M{"Bptr": starlark.None}, &StrctBool{}, StrctBool{Bptr: nil}, ""},
+		{"None into non-pointer", M{"I": starlark.None}, &StrctNums{}, nil, `cannot assign None to unsupported field type at I: int`},
+		{"None into slice", M{"i": starlark.None}, &StrctList{}, StrctList{I: nil}, ""},
+		{"None into map", M{"m": starlark.None}, &StrctSet{}, StrctSet{M: nil}, ""},
 
 		{"true into *bool", M{"bptr": starlark.Bool(true)}, &StrctBool{}, StrctBool{Bptr: &truev}, ""},
 		{"true into bool", M{"B": starlark.Bool(true)}, &StrctBool{}, StrctBool{B: true}, ""},
@@ -238,6 +254,16 @@ func TestFromStarlark(t *testing.T) {
 		{"tuple int", M{"i": tup(starlark.MakeInt(1), starlark.MakeInt(2), starlark.MakeInt(3))}, &StrctList{}, StrctList{I: []int{1, 2, 3}}, ``},
 		{"tuple string", M{"s": tup(starlark.String("a"), starlark.String("b"), starlark.String("c"))}, &StrctList{}, StrctList{S: []string{"a", "b", "c"}}, ``},
 		{"tuple mixed values", M{"s": tup(starlark.String("a"), starlark.MakeInt(1))}, &StrctList{}, nil, `cannot assign Int to unsupported field type at S[1]: string`},
+
+		{"set into map", M{"m": set(starlark.String("a"), starlark.String("b"))}, &StrctSet{}, StrctSet{M: map[string]bool{"a": true, "b": true}}, ``},
+		{"set into existing map", M{"m": set(starlark.String("a"), starlark.String("b"))}, &StrctSet{M: map[string]bool{"b": true, "c": true}}, StrctSet{M: map[string]bool{"a": true, "b": true, "c": true}}, ``},
+		{"set into slice", M{"sl": set(starlark.String("a"), starlark.String("b"))}, &StrctSet{}, StrctSet{Sl: []string{"a", "b"}}, ``},
+		{"set into existing slice", M{"sl": set(starlark.String("a"), starlark.String("b"))}, &StrctSet{Sl: []string{"c"}}, StrctSet{Sl: []string{"a", "b"}}, ``},
+		{"set into longer existing slice", M{"sl": set(starlark.String("a"), starlark.String("b"))}, &StrctSet{Sl: []string{"c", "d", "e"}}, StrctSet{Sl: []string{"a", "b"}}, ``},
+		{"empty set into existing slice", M{"sl": set()}, &StrctSet{Sl: []string{"c"}}, StrctSet{Sl: []string{}}, ``},
+		{"set into *map", M{"mptr": set(starlark.MakeInt(1), starlark.MakeInt(2))}, &StrctSet{}, StrctSet{Mptr: &map[int]bool{1: true, 2: true}}, ``},
+		{"None into *map", M{"mptr": starlark.None}, &StrctSet{Mptr: &map[int]bool{}}, StrctSet{Mptr: nil}, ``},
+		{"set mixed values", M{"m": set(starlark.String("a"), starlark.MakeInt(1))}, &StrctSet{}, nil, `cannot assign Int to unsupported field type at M[1]: string`},
 	}
 
 	for _, c := range cases {

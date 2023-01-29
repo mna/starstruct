@@ -150,6 +150,11 @@ func fromStarlarkValue(path string, starVal starlark.Value, dst reflect.Value) e
 			return err
 		}
 
+	case *starlark.Set:
+		if err := setFieldSet(path, dst, v); err != nil {
+			return err
+		}
+
 	default:
 		if v == nil {
 			return fmt.Errorf("nil starlark Value at %s", path)
@@ -160,8 +165,8 @@ func fromStarlarkValue(path string, starVal starlark.Value, dst reflect.Value) e
 }
 
 func setFieldNone(path string, fld reflect.Value) error {
-	if fld.Kind() != reflect.Pointer {
-		return fmt.Errorf("cannot assign None to non-pointer field at %s: %s", path, fld.Type())
+	if fld.Kind() != reflect.Pointer && fld.Kind() != reflect.Slice && fld.Kind() != reflect.Map {
+		return fmt.Errorf("cannot assign None to unsupported field type at %s: %s", path, fld.Type())
 	}
 	fld.Set(reflect.Zero(fld.Type()))
 	return nil
@@ -349,28 +354,29 @@ func setFieldDict(path string, fld reflect.Value, dict map[string]starlark.Value
 	return didSet, err
 }
 
-type lister interface {
-	starlark.Value
-	Index(i int) starlark.Value
-	Len() int
-}
-
 func setFieldList(path string, fld reflect.Value, list *starlark.List) error {
-	return setFieldListOrTuple(path, "List", fld, list)
+	return setFieldIterator(path, "List", fld, list)
 }
 
 func setFieldTuple(path string, fld reflect.Value, tup starlark.Tuple) error {
-	return setFieldListOrTuple(path, "Tuple", fld, tup)
+	return setFieldIterator(path, "Tuple", fld, tup)
 }
 
-func setFieldListOrTuple(path, label string, fld reflect.Value, list lister) error {
-	// support a single-level of indirection, in case the value may be None
+type iterable interface {
+	starlark.Iterable
+	Len() int
+}
+
+func setFieldIterator(path, label string, fld reflect.Value, iter iterable) error {
+	// support a single-level of indirection, in case the value may be None (even
+	// though it wouldn't be necessary as slice can be nil, but for consistency
+	// with other types)
 	if fld.Kind() == reflect.Pointer {
 		ptrToTyp := fld.Type().Elem()
 
 		// must be a slice
 		if ptrToTyp.Kind() != reflect.Slice {
-			return fmt.Errorf("cannot assign List to unsupported field type at %s: %s", path, fld.Type())
+			return fmt.Errorf("cannot assign %s to unsupported field type at %s: %s", label, path, fld.Type())
 		}
 
 		if fld.IsNil() {
@@ -381,11 +387,11 @@ func setFieldListOrTuple(path, label string, fld reflect.Value, list lister) err
 	}
 
 	if fld.Kind() != reflect.Slice {
-		return fmt.Errorf("cannot assign List to unsupported field type at %s: %s", path, fld.Type())
+		return fmt.Errorf("cannot assign %s to unsupported field type at %s: %s", label, path, fld.Type())
 	}
 	elemTyp := fld.Type().Elem()
 
-	count := list.Len()
+	count := iter.Len()
 	if count == 0 {
 		// special-case to behave the same as JSON Unmarshal: to unmarshal an empty
 		// JSON array into a slice, Unmarshal replaces the slice with a new empty
@@ -400,13 +406,73 @@ func setFieldListOrTuple(path, label string, fld reflect.Value, list lister) err
 	} else {
 		fld.SetLen(0)
 	}
-	for i := 0; i < count; i++ {
-		newVal := list.Index(i)
+
+	it := iter.Iterate()
+	defer it.Done()
+	var newVal starlark.Value
+	var i int
+	for it.Next(&newVal) {
 		newElem := reflect.New(elemTyp).Elem()
 		if err := fromStarlarkValue(fmt.Sprintf("%s[%d]", path, i), newVal, newElem); err != nil {
 			return err
 		}
 		fld.Set(reflect.Append(fld, newElem))
+		i++
+	}
+	return nil
+}
+
+var trueValue = reflect.ValueOf(true)
+
+func setFieldSet(path string, fld reflect.Value, set *starlark.Set) error {
+	if fldTyp := fld.Type(); fldTyp.Kind() == reflect.Slice || fldTyp.Kind() == reflect.Pointer && fldTyp.Elem().Kind() == reflect.Slice {
+		// same as decoding a List/Tuple
+		return setFieldIterator(path, "Set", fld, set)
+	}
+
+	// support a single-level of indirection, in case the value may be None (even
+	// though it wouldn't be necessary as map can be nil, but for consistency
+	// with other types)
+	if fld.Kind() == reflect.Pointer {
+		ptrToTyp := fld.Type().Elem()
+
+		if !isSetMap(ptrToTyp) {
+			return fmt.Errorf("cannot assign Set to unsupported field type at %s: %s", path, fld.Type())
+		}
+
+		if fld.IsNil() {
+			// allocate the pointer to map value
+			fld.Set(reflect.New(ptrToTyp))
+		}
+		fld = fld.Elem()
+	}
+
+	if !isSetMap(fld.Type()) {
+		return fmt.Errorf("cannot assign Set to unsupported field type at %s: %s", path, fld.Type())
+	}
+	keyTyp, elemTyp := fld.Type().Key(), fld.Type().Elem()
+
+	count := set.Len()
+
+	// mimic the JSON unmarshal behaviour: if the map is nil, allocate one,
+	// otherwise the existing map is reused, with the set elements being added to
+	// the map.
+	if fld.IsNil() {
+		mapTyp := reflect.MapOf(keyTyp, elemTyp)
+		fld.Set(reflect.MakeMapWithSize(mapTyp, count))
+	}
+
+	it := set.Iterate()
+	defer it.Done()
+	var newVal starlark.Value
+	var i int
+	for it.Next(&newVal) {
+		newKey := reflect.New(keyTyp).Elem()
+		if err := fromStarlarkValue(fmt.Sprintf("%s[%d]", path, i), newVal, newKey); err != nil {
+			return err
+		}
+		fld.SetMapIndex(newKey, trueValue)
+		i++
 	}
 	return nil
 }
@@ -452,8 +518,14 @@ func isByteSliceType(t reflect.Type) bool {
 	if t.Kind() != reflect.Slice {
 		return false
 	}
-	et := t.Elem()
-	return et.Kind() == reflect.Uint8
+	return t.Elem().Kind() == reflect.Uint8
+}
+
+func isSetMap(t reflect.Type) bool {
+	if t.Kind() != reflect.Map {
+		return false
+	}
+	return t.Elem().Kind() == reflect.Bool
 }
 
 func indexDictItems(keyVals []starlark.Tuple) map[string]starlark.Value {
