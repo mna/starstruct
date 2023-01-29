@@ -84,7 +84,7 @@ func walkStructEncode(path string, strct reflect.Value, dst dictGetSetter) error
 		// struct as if the fields were in the current struct.
 		if nm == "" {
 			if fldTyp.Anonymous {
-				if err := getFieldStruct(path, fld, dst); err != nil {
+				if err := walkStructEncode(path, fld, dst); err != nil {
 					return err
 				}
 				continue
@@ -216,13 +216,17 @@ func convertGoValue(path string, goVal reflect.Value, opts tagOpt) (starlark.Val
 		}
 		return set, nil
 
+	case goVal.Kind() == reflect.Struct:
+		n := goVal.NumField()
+		dict := starlark.NewDict(n)
+		if err := walkStructEncode(path, goVal, dict); err != nil {
+			return nil, err
+		}
+		return dict, nil
+
 	default:
 		return nil, fmt.Errorf("unsupported Go type %s at %s", goTyp, path)
 	}
-}
-
-func getFieldStruct(path string, strct reflect.Value, dst starlark.Value) error {
-	panic("unimplemented")
 }
 
 type tagOpt []string
