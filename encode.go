@@ -1,10 +1,17 @@
 package starstruct
 
-import "go.starlark.net/starlark"
+import (
+	"fmt"
+	"reflect"
+	"strings"
 
-// ToStarlark stores the values from the Go struct into a destination Starlark
-// string dictionary. Existing values in dst, if any, are left untouched if not
-// overridden by converting the Go struct.
+	"go.starlark.net/starlark"
+)
+
+// ToStarlark converts the values from the Go struct to corresponding Starlark
+// values stored into a destination Starlark string dictionary. Existing values
+// in dst, if any, are left untouched unless the Go struct conversion
+// overwrites them.
 //
 // It supports the following data types from Go to Starlark, and all Go types
 // can also be a pointer to that type:
@@ -32,7 +39,69 @@ import "go.starlark.net/starlark"
 // conversions, e.g. this would convert to a Set of Tuples of Bytes:
 //   - [][]string `starlark:"name,asset,astuple,asbytes"`
 //
-// It panics if vals is not a struct or a pointer to a struct.
+// It panics if vals is not a struct or a pointer to a struct. If dst is nil,
+// it proceeds with the conversion but the results of it will not be visible to
+// the caller (it can be used to validate the Go to Starlark conversion).
 func ToStarlark(vals any, dst starlark.StringDict) error {
+	strct := reflect.ValueOf(vals)
+	oriVal := strct
+	for strct.Kind() == reflect.Pointer {
+		strct = strct.Elem()
+	}
+	if strct.Kind() != reflect.Struct {
+		panic(fmt.Sprintf("source value is not a struct or a pointer to a struct: %s", oriVal.Type()))
+	}
+	if dst == nil {
+		// results will not be visible to the caller, but it will validate any
+		// conversion error.
+		dst = make(starlark.StringDict)
+	}
+	return walkStructEncode("", strct, stringDictValue{dst})
+}
+
+func walkStructEncode(path string, strct reflect.Value, dst dictGetSetter) error {
+	strctTyp := strct.Type()
+	count := strctTyp.NumField()
+	for i := 0; i < count; i++ {
+		fldTyp := strctTyp.Field(i)
+		nm, rawOpts, _ := strings.Cut(fldTyp.Tag.Get("starlark"), ",")
+		if !fldTyp.IsExported() || nm == "-" {
+			continue
+		}
+
+		path := path
+		if fldTyp.Name != "" {
+			if path != "" {
+				path += "."
+			}
+			path += fldTyp.Name
+		}
+		fld := strct.Field(i)
+
+		// use the field name as target starlark name, except if the field is an
+		// embedded anonymous struct - in this case we will walk this embedded
+		// struct as if the fields were in the current struct.
+		if nm == "" {
+			if fldTyp.Anonymous {
+				if err := getFieldStruct(path, fld, dst); err != nil {
+					return err
+				}
+				continue
+			}
+			nm = fldTyp.Name
+		}
+
+		_ = rawOpts
+		if err := toStarlarkValue(path, fld, dst); err != nil {
+		}
+	}
+	return nil
+}
+
+func toStarlarkValue(path string, goVal reflect.Value, dst starlark.Value) error {
+	panic("unimplemented")
+}
+
+func getFieldStruct(path string, strct reflect.Value, dst starlark.Value) error {
 	panic("unimplemented")
 }

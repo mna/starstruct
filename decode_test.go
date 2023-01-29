@@ -27,7 +27,7 @@ func TestFromStarlark(t *testing.T) {
 	type StrctNums struct {
 		I    int
 		Iptr *int
-		I64  int64 `starlark:"int64"`
+		I64  int64 `starlark:"int64,someopt,otheropt"`
 		I32  int32 `starlark:"int32"`
 		I16  int16 `starlark:"int16"`
 		I8   int8  `starlark:"int8"`

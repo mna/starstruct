@@ -38,29 +38,31 @@ import (
 // a true value into the map.
 func FromStarlark(vals starlark.StringDict, dst any) error {
 	rval := reflect.ValueOf(dst)
+	oriVal := rval
 	if rval.Kind() != reflect.Pointer {
-		panic(fmt.Sprintf("destination value is not a pointer: kind: %s, type: %s", rval.Kind(), rval.Type().Name()))
+		panic(fmt.Sprintf("destination value is not a pointer to a struct: %s", rval.Type()))
 	}
 	if rval.IsNil() {
-		panic(fmt.Sprintf("destination value is a nil pointer: kind: %s, type: %s", rval.Kind(), rval.Type().Name()))
+		// TODO: it could allocate the struct?
+		panic(fmt.Sprintf("destination value is a nil pointer: %s", rval.Type()))
 	}
 	rval = rval.Elem()
 	if rval.Kind() != reflect.Struct {
-		panic(fmt.Sprintf("destination value is not a pointer to a struct: pointer to kind: %s, type: %s", rval.Kind(), rval.Type().Name()))
+		panic(fmt.Sprintf("destination value is not a pointer to a struct: %s", oriVal.Type()))
 	}
 	if !rval.CanAddr() || !rval.CanSet() {
-		panic(fmt.Sprintf("destination value is a pointer to an unaddressable or unsettable struct: pointer to kind: %s, type: %s", rval.Kind(), rval.Type().Name()))
+		panic(fmt.Sprintf("destination value is a pointer to an unaddressable or unsettable struct: %s", oriVal.Type()))
 	}
-	_, err := walkStruct("", rval, vals)
+	_, err := walkStructDecode("", rval, stringDictValue{vals})
 	return err
 }
 
-func walkStruct(path string, strct reflect.Value, vals map[string]starlark.Value) (didSet bool, err error) {
+func walkStructDecode(path string, strct reflect.Value, vals dictGetSetter) (didSet bool, err error) {
 	strctTyp := strct.Type()
 	count := strctTyp.NumField()
 	for i := 0; i < count; i++ {
 		fldTyp := strctTyp.Field(i)
-		nm := fldTyp.Tag.Get("starlark")
+		nm, _, _ := strings.Cut(fldTyp.Tag.Get("starlark"), ",")
 		if !fldTyp.IsExported() || nm == "-" {
 			continue
 		}
@@ -80,6 +82,8 @@ func walkStruct(path string, strct reflect.Value, vals map[string]starlark.Value
 		// struct with the current vals.
 		if nm == "" {
 			if fldTyp.Anonymous {
+				// TODO: this effectively enforces that embedded fields are structs,
+				// document it or support any embedded field type
 				ok, err := setFieldDict(path, fld, vals)
 				if err != nil {
 					return didSet, err
@@ -93,10 +97,10 @@ func walkStruct(path string, strct reflect.Value, vals map[string]starlark.Value
 			tryLower = true // if no match is found with the field name, try all lowercase
 		}
 
-		matchingVal, ok := vals[nm]
+		matchingVal, ok, _ := vals.Get(starlark.String(nm)) // cannot fail, key is a string
 		if !ok {
 			if tryLower {
-				matchingVal, ok = vals[strings.ToLower(nm)]
+				matchingVal, ok, _ = vals.Get(starlark.String(strings.ToLower(nm)))
 			}
 			if !ok {
 				// leave the field unmodified, no matching starlark value
@@ -147,7 +151,7 @@ func fromStarlarkValue(path string, starVal starlark.Value, dst reflect.Value) e
 		}
 
 	case *starlark.Dict:
-		if _, err := setFieldDict(path, dst, indexDictItems(v.Items())); err != nil {
+		if _, err := setFieldDict(path, dst, v); err != nil {
 			return err
 		}
 
@@ -335,7 +339,7 @@ func setFieldFloat(path string, fld reflect.Value, f starlark.Float) error {
 	return nil
 }
 
-func setFieldDict(path string, fld reflect.Value, dict map[string]starlark.Value) (didSet bool, err error) {
+func setFieldDict(path string, fld reflect.Value, dict dictGetSetter) (didSet bool, err error) {
 	var ptrToStrct reflect.Value
 
 	// support a single-level of indirection, in case the value may be None
@@ -358,7 +362,7 @@ func setFieldDict(path string, fld reflect.Value, dict map[string]starlark.Value
 	if fld.Kind() != reflect.Struct {
 		return didSet, fmt.Errorf("cannot assign Dict to unsupported field type at %s: %s", path, fld.Type())
 	}
-	didSet, err = walkStruct(path, fld, dict)
+	didSet, err = walkStructDecode(path, fld, dict)
 	if didSet && ptrToStrct.Kind() == reflect.Pointer {
 		ptrToStrct.Set(fld.Addr())
 	}
@@ -537,13 +541,4 @@ func isSetMap(t reflect.Type) bool {
 		return false
 	}
 	return t.Elem().Kind() == reflect.Bool
-}
-
-func indexDictItems(keyVals []starlark.Tuple) map[string]starlark.Value {
-	m := make(map[string]starlark.Value, len(keyVals))
-	for _, kv := range keyVals {
-		k, _ := starlark.AsString(kv[0])
-		m[k] = kv[1]
-	}
-	return m
 }
