@@ -32,8 +32,9 @@ import (
 //   - For []byte fields, `starlark:"name,asstring"` to convert to String
 //   - For []byte ([]uint8) fields, `starlark:"name,aslist"` to convert to List
 //     (of Int)
-//   - For slices, `starlark:"name,astuple"` to convert to Tuple
-//   - For slices, `starlark:"name,asset"` to convert to Set
+//   - For slices (including []byte), `starlark:"name,astuple"` to convert to
+//     Tuple
+//   - For slices (including []byte), `starlark:"name,asset"` to convert to Set
 //
 // Any level of conversion arguments can be provided, to support for nested
 // conversions, e.g. this would convert to a Set of Tuples of Bytes:
@@ -91,15 +92,18 @@ func walkStructEncode(path string, strct reflect.Value, dst dictGetSetter) error
 			nm = fldTyp.Name
 		}
 
-		_ = rawOpts
-		if err := toStarlarkValue(path, nm, fld, dst); err != nil {
+		var opts []string
+		if rawOpts != "" {
+			opts = strings.Split(rawOpts, ",")
+		}
+		if err := toStarlarkValue(path, nm, fld, dst, opts); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func toStarlarkValue(path, dstName string, goVal reflect.Value, dst dictGetSetter) error {
+func toStarlarkValue(path, dstName string, goVal reflect.Value, dst dictGetSetter, opts []string) error {
 	key := starlark.String(dstName)
 	goTyp := goVal.Type()
 
@@ -139,6 +143,17 @@ func toStarlarkValue(path, dstName string, goVal reflect.Value, dst dictGetSette
 		if err := dst.SetKey(key, starlark.MakeUint64(goVal.Uint())); err != nil {
 			return fmt.Errorf("failed to set key %s to Int at %s: %w", dstName, path, err)
 		}
+
+	case goVal.Kind() == reflect.String:
+		if len(opts) > 0 && opts[0] == "asbytes" {
+			if err := dst.SetKey(key, starlark.Bytes(goVal.String())); err != nil {
+				return fmt.Errorf("failed to set key %s to Bytes at %s: %w", dstName, path, err)
+			}
+		} else if err := dst.SetKey(key, starlark.String(goVal.String())); err != nil {
+			return fmt.Errorf("failed to set key %s to String at %s: %w", dstName, path, err)
+		}
+
+	case isSetMap(goVal.Type()):
 
 	default:
 		return fmt.Errorf("unsupported Go type %s at %s", goTyp, path)
