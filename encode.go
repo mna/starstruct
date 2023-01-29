@@ -92,14 +92,43 @@ func walkStructEncode(path string, strct reflect.Value, dst dictGetSetter) error
 		}
 
 		_ = rawOpts
-		if err := toStarlarkValue(path, fld, dst); err != nil {
+		if err := toStarlarkValue(path, nm, fld, dst); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func toStarlarkValue(path string, goVal reflect.Value, dst starlark.Value) error {
-	panic("unimplemented")
+func toStarlarkValue(path, dstName string, goVal reflect.Value, dst dictGetSetter) error {
+	key := starlark.String(dstName)
+	goTyp := goVal.Type()
+
+	var isNil bool
+	// allow one level of indirection
+	if goTyp.Kind() == reflect.Pointer && goTyp.Elem().Kind() != reflect.Pointer {
+		isNil = goVal.IsNil()
+		goVal = goVal.Elem()
+	}
+	// map and slice can also be nil
+	if goVal.Kind() == reflect.Map || goVal.Kind() == reflect.Slice {
+		isNil = goVal.IsNil()
+	}
+
+	switch {
+	case isNil:
+		if err := dst.SetKey(key, starlark.None); err != nil {
+			return fmt.Errorf("failed to set key %s to None at %s: %w", dstName, path, err)
+		}
+
+	case goVal.Kind() == reflect.Bool:
+		if err := dst.SetKey(key, starlark.Bool(goVal.Bool())); err != nil {
+			return fmt.Errorf("failed to set key %s to Bool at %s: %w", dstName, path, err)
+		}
+
+	default:
+		return fmt.Errorf("unsupported Go type %s at %s", goTyp, path)
+	}
+	return nil
 }
 
 func getFieldStruct(path string, strct reflect.Value, dst starlark.Value) error {

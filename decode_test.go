@@ -2,7 +2,6 @@ package starstruct
 
 import (
 	"math"
-	"math/big"
 	"reflect"
 	"testing"
 
@@ -16,6 +15,7 @@ func TestFromStarlark(t *testing.T) {
 		B2ptr **bool
 		B     bool
 	}
+
 	type StrctStr struct {
 		S      string
 		Sptr   *string
@@ -24,6 +24,7 @@ func TestFromStarlark(t *testing.T) {
 		BsPtr  *[]byte
 		Bs2Ptr **[]byte
 	}
+
 	type StrctNums struct {
 		I    int
 		Iptr *int
@@ -40,11 +41,13 @@ func TestFromStarlark(t *testing.T) {
 		F32  float32
 		F64  float64
 	}
+
 	type StrctDict struct {
 		*StrctNums
 		StrctStr
 		StrctBool `starlark:"bools"`
 	}
+
 	type StrctList struct {
 		I        []int
 		S        []string
@@ -53,43 +56,12 @@ func TestFromStarlark(t *testing.T) {
 		Strct    []StrctBool
 		StrctPtr []*StrctBool
 	}
+
 	type StrctSet struct {
 		M    map[string]bool
 		Sl   []string
 		Mptr *map[int]bool
 	}
-	type M = map[string]starlark.Value
-
-	dict := func(m M) *starlark.Dict {
-		d := starlark.NewDict(len(m))
-		for k, v := range m {
-			if err := d.SetKey(starlark.String(k), v); err != nil {
-				panic(err)
-			}
-		}
-		return d
-	}
-	list := func(vs ...starlark.Value) *starlark.List {
-		return starlark.NewList(vs)
-	}
-	tup := func(vs ...starlark.Value) starlark.Tuple {
-		return starlark.Tuple(vs)
-	}
-	set := func(vs ...starlark.Value) *starlark.Set {
-		x := starlark.NewSet(len(vs))
-		for _, v := range vs {
-			if err := x.Insert(v); err != nil {
-				panic(err)
-			}
-		}
-		return x
-	}
-
-	truev, falsev := true, false
-	tooBig := big.NewInt(1).Add(big.NewInt(1).SetUint64(math.MaxUint64), big.NewInt(1))
-	sptr := func(s string) *string { return &s }
-	bsptr := func(s string) *[]byte { bs := []byte(s); return &bs }
-	iptr := func(i int) *int { return &i }
 
 	cases := []struct {
 		name string
