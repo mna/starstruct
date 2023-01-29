@@ -103,8 +103,21 @@ func walkStructEncode(path string, strct reflect.Value, dst dictGetSetter) error
 	return nil
 }
 
-func toStarlarkValue(path, dstName string, goVal reflect.Value, dst dictGetSetter, opts []string) error {
+func toStarlarkValue(path, dstName string, goVal reflect.Value, dst dictGetSetter, opts tagOpt) error {
 	key := starlark.String(dstName)
+	goTyp := goVal.Type()
+
+	sval, err := convertGoValue(path, goVal, opts)
+	if err != nil {
+		return err
+	}
+	if err := dst.SetKey(key, sval); err != nil {
+		return fmt.Errorf("failed to set value of key %s with type %s at %s: %w", dstName, goTyp, path, err)
+	}
+	return nil
+}
+
+func convertGoValue(path string, goVal reflect.Value, opts tagOpt) (starlark.Value, error) {
 	goTyp := goVal.Type()
 
 	var isNil bool
@@ -118,49 +131,112 @@ func toStarlarkValue(path, dstName string, goVal reflect.Value, dst dictGetSette
 		isNil = goVal.IsNil()
 	}
 
+	curOpt := opts.current()
 	switch {
 	case isNil:
-		if err := dst.SetKey(key, starlark.None); err != nil {
-			return fmt.Errorf("failed to set key %s to None at %s: %w", dstName, path, err)
-		}
-
+		return starlark.None, nil
 	case goVal.Kind() == reflect.Bool:
-		if err := dst.SetKey(key, starlark.Bool(goVal.Bool())); err != nil {
-			return fmt.Errorf("failed to set key %s to Bool at %s: %w", dstName, path, err)
-		}
-
+		return starlark.Bool(goVal.Bool()), nil
 	case goVal.Kind() == reflect.Float32 || goVal.Kind() == reflect.Float64:
-		if err := dst.SetKey(key, starlark.Float(goVal.Float())); err != nil {
-			return fmt.Errorf("failed to set key %s to Float at %s: %w", dstName, path, err)
-		}
-
+		return starlark.Float(goVal.Float()), nil
 	case goVal.Kind() >= reflect.Int && goVal.Kind() <= reflect.Int64:
-		if err := dst.SetKey(key, starlark.MakeInt64(goVal.Int())); err != nil {
-			return fmt.Errorf("failed to set key %s to Int at %s: %w", dstName, path, err)
-		}
-
+		return starlark.MakeInt64(goVal.Int()), nil
 	case goVal.Kind() >= reflect.Uint && goVal.Kind() <= reflect.Uintptr:
-		if err := dst.SetKey(key, starlark.MakeUint64(goVal.Uint())); err != nil {
-			return fmt.Errorf("failed to set key %s to Int at %s: %w", dstName, path, err)
-		}
+		return starlark.MakeUint64(goVal.Uint()), nil
 
 	case goVal.Kind() == reflect.String:
-		if len(opts) > 0 && opts[0] == "asbytes" {
-			if err := dst.SetKey(key, starlark.Bytes(goVal.String())); err != nil {
-				return fmt.Errorf("failed to set key %s to Bytes at %s: %w", dstName, path, err)
-			}
-		} else if err := dst.SetKey(key, starlark.String(goVal.String())); err != nil {
-			return fmt.Errorf("failed to set key %s to String at %s: %w", dstName, path, err)
+		if curOpt == "asbytes" {
+			return starlark.Bytes(goVal.String()), nil
 		}
+		return starlark.String(goVal.String()), nil
 
-	case isSetMap(goVal.Type()):
+	case isByteSliceType(goVal.Type()) && curOpt != "aslist" && curOpt != "astuple" && curOpt != "asset":
+		if curOpt == "asstring" {
+			return starlark.String(goVal.Bytes()), nil
+		}
+		return starlark.Bytes(goVal.Bytes()), nil
+
+	case goVal.Kind() == reflect.Slice && curOpt != "astuple" && curOpt != "asset":
+		n := goVal.Len()
+		listVals := make([]starlark.Value, n)
+		for i := 0; i < n; i++ {
+			v := goVal.Index(i)
+			sval, err := convertGoValue(fmt.Sprintf("%s[%d]", path, i), v, opts.shift())
+			if err != nil {
+				return nil, err
+			}
+			listVals[i] = sval
+		}
+		return starlark.NewList(listVals), nil
+
+	case goVal.Kind() == reflect.Slice && curOpt == "astuple":
+		n := goVal.Len()
+		tupVals := make([]starlark.Value, n)
+		for i := 0; i < n; i++ {
+			v := goVal.Index(i)
+			sval, err := convertGoValue(fmt.Sprintf("%s[%d]", path, i), v, opts.shift())
+			if err != nil {
+				return nil, err
+			}
+			tupVals[i] = sval
+		}
+		return starlark.Tuple(tupVals), nil
+
+	case goVal.Kind() == reflect.Slice && curOpt == "asset":
+		n := goVal.Len()
+		set := starlark.NewSet(n)
+		for i := 0; i < n; i++ {
+			v := goVal.Index(i)
+			sval, err := convertGoValue(fmt.Sprintf("%s[%d]", path, i), v, opts.shift())
+			if err != nil {
+				return nil, err
+			}
+			if err := set.Insert(sval); err != nil {
+				return nil, fmt.Errorf("failed to insert value into Set at %s: %w", path, err)
+			}
+		}
+		return set, nil
+
+	case isSetMapType(goVal.Type()):
+		n := goVal.Len()
+		set := starlark.NewSet(n)
+		iter := goVal.MapRange()
+		for iter.Next() {
+			k, v := iter.Key(), iter.Value()
+			if !v.Bool() {
+				continue
+			}
+			sval, err := convertGoValue(fmt.Sprintf("%s[%v]", path, k), k, opts.shift())
+			if err != nil {
+				return nil, err
+			}
+			if err := set.Insert(sval); err != nil {
+				return nil, fmt.Errorf("failed to insert value into Set at %s: %w", path, err)
+			}
+		}
+		return set, nil
 
 	default:
-		return fmt.Errorf("unsupported Go type %s at %s", goTyp, path)
+		return nil, fmt.Errorf("unsupported Go type %s at %s", goTyp, path)
 	}
-	return nil
 }
 
 func getFieldStruct(path string, strct reflect.Value, dst starlark.Value) error {
 	panic("unimplemented")
+}
+
+type tagOpt []string
+
+func (t tagOpt) current() string {
+	if len(t) > 0 {
+		return t[0]
+	}
+	return ""
+}
+
+func (t tagOpt) shift() tagOpt {
+	if len(t) <= 1 {
+		return tagOpt(nil)
+	}
+	return tagOpt(t[1:])
 }

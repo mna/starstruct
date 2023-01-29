@@ -451,7 +451,7 @@ func setFieldSet(path string, fld reflect.Value, set *starlark.Set) error {
 	if fld.Kind() == reflect.Pointer {
 		ptrToTyp := fld.Type().Elem()
 
-		if !isSetMap(ptrToTyp) {
+		if !isSetMapType(ptrToTyp) {
 			return fmt.Errorf("cannot assign Set to unsupported field type at %s: %s", path, fld.Type())
 		}
 
@@ -462,7 +462,7 @@ func setFieldSet(path string, fld reflect.Value, set *starlark.Set) error {
 		fld = fld.Elem()
 	}
 
-	if !isSetMap(fld.Type()) {
+	if !isSetMapType(fld.Type()) {
 		return fmt.Errorf("cannot assign Set to unsupported field type at %s: %s", path, fld.Type())
 	}
 	keyTyp, elemTyp := fld.Type().Key(), fld.Type().Elem()
@@ -536,7 +536,7 @@ func isByteSliceType(t reflect.Type) bool {
 	return t.Elem().Kind() == reflect.Uint8
 }
 
-func isSetMap(t reflect.Type) bool {
+func isSetMapType(t reflect.Type) bool {
 	if t.Kind() != reflect.Map {
 		return false
 	}
