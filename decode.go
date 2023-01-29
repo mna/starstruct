@@ -10,8 +10,9 @@ import (
 )
 
 // FromStarlark loads the starlark values from vals into a destination Go
-// struct. It supports the following data types from Starlark to Go:
-//   - NoneType => nil (Go field must be a pointer)
+// struct. It supports the following data types from Starlark to Go, and all Go
+// types can also be a pointer to that type:
+//   - NoneType => nil (Go field must be a pointer, slice or map)
 //   - Bool     => bool
 //   - Bytes    => []byte or string
 //   - String   => []byte or string
@@ -20,11 +21,21 @@ import (
 //   - Dict     => struct
 //   - List     => slice of any supported Go type
 //   - Tuple    => slice of any supported Go type
-//   - Set      => map[any supported Go type valid as map key]bool or slice
+//   - Set      => map[T]bool or []T where T is any supported Go type
 //
 // It panics if dst is not a non-nil pointer to an addressable and settable
 // struct. If a target field does not exist in the starlark dictionary, it is
 // unmodified.
+//
+// Decoding into a slice follows the same behavior as JSON umarshaling: it
+// resets the slice length to zero and then appends each element to the slice.
+// As a special case, to decode an empty starlark List, Tuple or Set into a
+// slice, it replaces the slice with a new empty slice.
+//
+// Decoding a Set into a map also follows the same behavior as JSON
+// unmarshaling: if the map is nil, it allocates a new map. Otherwise it reuses
+// the existing map, keeping existing entries. It then stores each Set key with
+// a true value into the map.
 func FromStarlark(vals starlark.StringDict, dst any) error {
 	rval := reflect.ValueOf(dst)
 	if rval.Kind() != reflect.Pointer {
