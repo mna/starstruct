@@ -172,9 +172,9 @@ func TestToStarlarkInvalidInput(t *testing.T) {
 	var s string
 
 	require.PanicsWithValue(t, `source value is not a struct or a pointer to a struct: string`, func() {
-		ToStarlark(s, nil)
+		_ = ToStarlark(s, nil)
 	})
 	require.PanicsWithValue(t, `source value is not a struct or a pointer to a struct: *string`, func() {
-		ToStarlark(&s, nil)
+		_ = ToStarlark(&s, nil)
 	})
 }
