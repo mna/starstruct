@@ -1,6 +1,7 @@
 package starstruct
 
 import (
+	"io"
 	"testing"
 	"time"
 
@@ -15,6 +16,9 @@ func TestToStarlark(t *testing.T) {
 	}
 	type NestedStruct struct {
 		IntStruct
+	}
+	type ChanStruct struct {
+		Ch chan int
 	}
 
 	cases := []struct {
@@ -90,17 +94,17 @@ func TestToStarlark(t *testing.T) {
 			Ss []string `starlark:"sasset,asset,asbytes"`
 		}{Ss: []string{"a", "b"}}, M{}, M{"sasset": set(starlark.Bytes("a"), starlark.Bytes("b"))}, ``},
 
-		{"empty struct", struct{}{}, M{}, M{}, ``},
-		{"embedded struct no field", struct{ EmptyStruct }{}, M{}, M{}, ``},
-		{"embedded struct anonymous", struct{ IntStruct }{IntStruct: IntStruct{I: 1}}, M{}, M{"I": starlark.MakeInt(1)}, ``},
-		{"embedded struct named", struct {
+		{"empty struct", &struct{}{}, M{}, M{}, ``},
+		{"embedded struct no field", &struct{ EmptyStruct }{}, M{}, M{}, ``},
+		{"embedded struct anonymous", &struct{ IntStruct }{IntStruct: IntStruct{I: 1}}, M{}, M{"I": starlark.MakeInt(1)}, ``},
+		{"embedded struct named", &struct {
 			IntStruct `starlark:"embedded"`
 		}{IntStruct: IntStruct{I: 1}}, M{}, M{"embedded": dict(M{"I": starlark.MakeInt(1)})}, ``},
-		{"nested embedded struct", struct{ NestedStruct }{NestedStruct: NestedStruct{IntStruct: IntStruct{I: 2}}}, M{}, M{"I": starlark.MakeInt(2)}, ``},
-		{"nested embedded struct named", struct {
+		{"nested embedded struct", &struct{ NestedStruct }{NestedStruct: NestedStruct{IntStruct: IntStruct{I: 2}}}, M{}, M{"I": starlark.MakeInt(2)}, ``},
+		{"nested embedded struct named", &struct {
 			NestedStruct `starlark:"nested"`
 		}{NestedStruct: NestedStruct{IntStruct: IntStruct{I: 3}}}, M{}, M{"nested": dict(M{"I": starlark.MakeInt(3)})}, ``},
-		{"nested embedded struct ignored", struct {
+		{"nested embedded struct ignored", &struct {
 			NestedStruct `starlark:"-"`
 		}{NestedStruct: NestedStruct{IntStruct: IntStruct{I: 3}}}, M{}, M{}, ``},
 
@@ -115,6 +119,35 @@ func TestToStarlark(t *testing.T) {
 		{"chan unsupported ignored", struct {
 			Ch chan int `starlark:"-"`
 		}{Ch: make(chan int)}, M{}, M{}, ``},
+		{"slice of funcs as tuples as sets", struct {
+			Fs [][]func() `starlark:"fs,astuple,asset"`
+		}{Fs: [][]func(){{func() {}}}}, M{}, nil, `unsupported Go type func() at Fs[0][0]`},
+		{"slice of strings as tuple as set", struct {
+			Ss [][]string `starlark:"ss,astuple,asset"`
+		}{Ss: [][]string{{"a"}}}, M{}, M{"ss": tup(set(starlark.String("a")))}, ``},
+		{"slice of strings as list as set as tuple", struct {
+			Sss [][][]string `starlark:"sss,aslist,asset,astuple"`
+		}{Sss: [][][]string{{{"a"}}}}, M{}, M{"sss": list(set(tup(starlark.String("a"))))}, ``},
+		{"invalid slice type for as set", struct {
+			Strct []struct{} `starlark:"strct,asset"`
+		}{Strct: []struct{}{{}}}, M{}, nil, `failed to insert value into Set at Strct: unhashable type: dict`},
+		{"invalid map key type for set", struct {
+			M map[struct{}]bool
+		}{M: map[struct{}]bool{{}: true}}, M{}, nil, `failed to insert value into Set at M: unhashable type: dict`},
+		{"unsupported map key type", struct {
+			M map[io.Reader]bool
+		}{M: map[io.Reader]bool{io.Reader(nil): true}}, M{}, nil, `unsupported Go type io.Reader at M[<nil>]`},
+		{"unsupported slice type", struct {
+			Sl []chan int
+		}{Sl: []chan int{make(chan int)}}, M{}, nil, `unsupported Go type chan int at Sl[0]`},
+		{"unsupported struct field type", struct {
+			Strct struct {
+				Ch chan int
+			}
+		}{Strct: struct{ Ch chan int }{Ch: make(chan int)}}, M{}, nil, `unsupported Go type chan int at Strct.Ch`},
+		{"unsupported embedded struct field type", struct {
+			ChanStruct
+		}{ChanStruct: ChanStruct{Ch: make(chan int)}}, M{}, nil, `unsupported Go type chan int at ChanStruct.Ch`},
 	}
 
 	for _, c := range cases {

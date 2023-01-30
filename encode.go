@@ -112,6 +112,7 @@ func toStarlarkValue(path, dstName string, goVal reflect.Value, dst dictGetSette
 		return err
 	}
 	if err := dst.SetKey(key, sval); err != nil {
+		// don't think this error can happen (key is always a string)
 		return fmt.Errorf("failed to set value of key %s with type %s at %s: %w", dstName, goTyp, path, err)
 	}
 	return nil
