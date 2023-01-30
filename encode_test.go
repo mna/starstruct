@@ -101,9 +101,9 @@ func TestToStarlark(t *testing.T) {
 			IntStruct `starlark:"embedded"`
 		}{IntStruct: IntStruct{I: 1}}, M{}, M{"embedded": dict(M{"I": starlark.MakeInt(1)})}, ``},
 		{"nested embedded struct", &struct{ NestedStruct }{NestedStruct: NestedStruct{IntStruct: IntStruct{I: 2}}}, M{}, M{"I": starlark.MakeInt(2)}, ``},
-		{"nested embedded struct named", &struct {
-			NestedStruct `starlark:"nested"`
-		}{NestedStruct: NestedStruct{IntStruct: IntStruct{I: 3}}}, M{}, M{"nested": dict(M{"I": starlark.MakeInt(3)})}, ``},
+		{"nested pointer embedded struct named", &struct {
+			*NestedStruct `starlark:"nested"`
+		}{NestedStruct: &NestedStruct{IntStruct: IntStruct{I: 3}}}, M{}, M{"nested": dict(M{"I": starlark.MakeInt(3)})}, ``},
 		{"nested embedded struct ignored", &struct {
 			NestedStruct `starlark:"-"`
 		}{NestedStruct: NestedStruct{IntStruct: IntStruct{I: 3}}}, M{}, M{}, ``},
@@ -148,6 +148,9 @@ func TestToStarlark(t *testing.T) {
 		{"unsupported embedded struct field type", struct {
 			ChanStruct
 		}{ChanStruct: ChanStruct{Ch: make(chan int)}}, M{}, nil, `unsupported Go type chan int at ChanStruct.Ch`},
+		{"unsupported embedded field type", struct {
+			time.Duration
+		}{Duration: time.Hour}, M{}, nil, `embedded field at Duration of type time.Duration must be a struct or a pointer to a struct`},
 	}
 
 	for _, c := range cases {
@@ -163,4 +166,15 @@ func TestToStarlark(t *testing.T) {
 			require.Equal(t, c.want, c.dst)
 		})
 	}
+}
+
+func TestToStarlarkInvalidInput(t *testing.T) {
+	var s string
+
+	require.PanicsWithValue(t, `source value is not a struct or a pointer to a struct: string`, func() {
+		ToStarlark(s, nil)
+	})
+	require.PanicsWithValue(t, `source value is not a struct or a pointer to a struct: *string`, func() {
+		ToStarlark(&s, nil)
+	})
 }

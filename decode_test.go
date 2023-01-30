@@ -4,6 +4,7 @@ import (
 	"math"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.starlark.net/starlark"
@@ -62,6 +63,10 @@ func TestFromStarlark(t *testing.T) {
 		M    map[string]bool
 		Sl   []string
 		Mptr *map[int]bool
+	}
+
+	type StrctEmbedDuration struct {
+		time.Duration
 	}
 
 	cases := []struct {
@@ -240,6 +245,8 @@ func TestFromStarlark(t *testing.T) {
 		{"set into *map", M{"mptr": set(starlark.MakeInt(1), starlark.MakeInt(2))}, &StrctSet{}, StrctSet{Mptr: &map[int]bool{1: true, 2: true}}, ``},
 		{"None into *map", M{"mptr": starlark.None}, &StrctSet{Mptr: &map[int]bool{}}, StrctSet{Mptr: nil}, ``},
 		{"set mixed values", M{"m": set(starlark.String("a"), starlark.MakeInt(1))}, &StrctSet{}, nil, `cannot assign Int to unsupported field type at M[1]: string`},
+
+		{"target is embedded non-struct", M{"duration": starlark.MakeInt(1)}, &StrctEmbedDuration{}, nil, `cannot assign Dict to unsupported field type at Duration: time.Duration`},
 	}
 
 	for _, c := range cases {

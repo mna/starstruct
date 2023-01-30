@@ -40,9 +40,20 @@ import (
 // conversions, e.g. this would convert to a Set of Tuples of Bytes:
 //   - [][]string `starlark:"name,asset,astuple,asbytes"`
 //
-// It panics if vals is not a struct or a pointer to a struct. If dst is nil,
-// it proceeds with the conversion but the results of it will not be visible to
-// the caller (it can be used to validate the Go to Starlark conversion).
+// Embedded fields in structs are supported as follows:
+//   - The field must be exported
+//   - The type of the field must be a struct or a pointer to a struct
+//   - If the embedded field has no starlark name specified in its struct tag,
+//     the fields of the embedded struct are encoded as if they were part of the
+//     parent struct.
+//   - If the embedded field has a starlark name specified in its struct tag
+//     (and that name is not "-"), the embedded struct is encoded as a starlark
+//     dictionary under that name.
+//
+// ToStarlark panics if vals is not a struct or a pointer to a struct. If dst
+// is nil, it proceeds with the conversion but the results of it will not be
+// visible to the caller (it can be used to validate the Go to Starlark
+// conversion).
 func ToStarlark(vals any, dst starlark.StringDict) error {
 	strct := reflect.ValueOf(vals)
 	oriVal := strct
@@ -84,6 +95,9 @@ func walkStructEncode(path string, strct reflect.Value, dst dictGetSetter) error
 		// struct as if the fields were in the current struct.
 		if nm == "" {
 			if fldTyp.Anonymous {
+				if !isStructOrPtrType(fldTyp.Type) {
+					return fmt.Errorf("embedded field at %s of type %s must be a struct or a pointer to a struct", path, fldTyp.Type)
+				}
 				if err := walkStructEncode(path, fld, dst); err != nil {
 					return err
 				}
@@ -228,6 +242,14 @@ func convertGoValue(path string, goVal reflect.Value, opts tagOpt) (starlark.Val
 	default:
 		return nil, fmt.Errorf("unsupported Go type %s at %s", goTyp, path)
 	}
+}
+
+// returns true if t is a struct or pointer to struct.
+func isStructOrPtrType(t reflect.Type) bool {
+	if t.Kind() == reflect.Struct {
+		return true
+	}
+	return t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct
 }
 
 type tagOpt []string
