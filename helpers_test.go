@@ -37,11 +37,12 @@ func set(vs ...starlark.Value) *starlark.Set {
 	return x
 }
 
-func sptr(s string) *string  { return &s }
-func bsptr(s string) *[]byte { bs := []byte(s); return &bs }
-func bptr(b byte) *byte      { return &b }
-func iptr(i int) *int        { return &i }
-func uptr(i uint) *uint      { return &i }
+func sptr(s string) *string   { return &s }
+func bsptr(s string) *[]byte  { bs := []byte(s); return &bs }
+func bptr(b byte) *byte       { return &b }
+func iptr(i int) *int         { return &i }
+func uptr(i uint) *uint       { return &i }
+func fptr(f float64) *float64 { return &f }
 
 var (
 	truev, falsev = true, false

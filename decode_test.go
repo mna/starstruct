@@ -40,6 +40,7 @@ func TestFromStarlark(t *testing.T) {
 		Up   uintptr
 		F32  float32
 		F64  float64
+		Fptr *float64
 	}
 
 	type StrctDict struct {
@@ -110,6 +111,8 @@ func TestFromStarlark(t *testing.T) {
 		{"6 into uintptr", M{"Up": starlark.MakeUint(6)}, &StrctNums{}, StrctNums{Up: 6}, ``},
 		{"7 into float32", M{"f32": starlark.MakeUint(7)}, &StrctNums{}, StrctNums{F32: 7}, ``},
 		{"8 into float64", M{"f64": starlark.MakeUint(8)}, &StrctNums{}, StrctNums{F64: 8}, ``},
+		{"9 into *float64", M{"fptr": starlark.MakeUint(9)}, &StrctNums{}, StrctNums{Fptr: fptr(9)}, ``},
+		{"None into *float64", M{"fptr": starlark.None}, &StrctNums{}, StrctNums{Fptr: nil}, ``},
 		{"-1 into int", M{"i": starlark.MakeInt(-1)}, &StrctNums{}, StrctNums{I: -1}, ``},
 		{"-2 into int8", M{"int8": starlark.MakeInt(-2)}, &StrctNums{}, StrctNums{I8: -2}, ``},
 		{"-3 into int16", M{"int16": starlark.MakeInt(-3)}, &StrctNums{}, StrctNums{I16: -3}, ``},
@@ -146,6 +149,7 @@ func TestFromStarlark(t *testing.T) {
 		{"1.1 into uintptr", M{"up": starlark.Float(1.1)}, &StrctNums{}, nil, `value cannot be exactly represented`},
 		{"1.1 into float32", M{"f32": starlark.Float(1.1)}, &StrctNums{}, StrctNums{F32: 1.1}, ``},
 		{"1.1 into float64", M{"f64": starlark.Float(1.1)}, &StrctNums{}, StrctNums{F64: 1.1}, ``},
+		{"1.1 into *float64", M{"fptr": starlark.Float(1.1)}, &StrctNums{}, StrctNums{Fptr: fptr(1.1)}, ``},
 
 		{"-1.1 into int", M{"i": starlark.Float(-1.1)}, &StrctNums{}, nil, `value cannot be exactly represented`},
 		{"-1.1 into int8", M{"int8": starlark.Float(-1.1)}, &StrctNums{}, nil, `value cannot be exactly represented`},

@@ -2,12 +2,21 @@ package starstruct
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.starlark.net/starlark"
 )
 
 func TestToStarlark(t *testing.T) {
+	type EmptyStruct struct{}
+	type IntStruct struct {
+		I int
+	}
+	type NestedStruct struct {
+		IntStruct
+	}
+
 	cases := []struct {
 		name string
 		vals any
@@ -80,6 +89,32 @@ func TestToStarlark(t *testing.T) {
 		{"[]string as Set of Bytes", struct {
 			Ss []string `starlark:"sasset,asset,asbytes"`
 		}{Ss: []string{"a", "b"}}, M{}, M{"sasset": set(starlark.Bytes("a"), starlark.Bytes("b"))}, ``},
+
+		{"empty struct", struct{}{}, M{}, M{}, ``},
+		{"embedded struct no field", struct{ EmptyStruct }{}, M{}, M{}, ``},
+		{"embedded struct anonymous", struct{ IntStruct }{IntStruct: IntStruct{I: 1}}, M{}, M{"I": starlark.MakeInt(1)}, ``},
+		{"embedded struct named", struct {
+			IntStruct `starlark:"embedded"`
+		}{IntStruct: IntStruct{I: 1}}, M{}, M{"embedded": dict(M{"I": starlark.MakeInt(1)})}, ``},
+		{"nested embedded struct", struct{ NestedStruct }{NestedStruct: NestedStruct{IntStruct: IntStruct{I: 2}}}, M{}, M{"I": starlark.MakeInt(2)}, ``},
+		{"nested embedded struct named", struct {
+			NestedStruct `starlark:"nested"`
+		}{NestedStruct: NestedStruct{IntStruct: IntStruct{I: 3}}}, M{}, M{"nested": dict(M{"I": starlark.MakeInt(3)})}, ``},
+		{"nested embedded struct ignored", struct {
+			NestedStruct `starlark:"-"`
+		}{NestedStruct: NestedStruct{IntStruct: IntStruct{I: 3}}}, M{}, M{}, ``},
+
+		{"nil map", struct{ M map[string]bool }{}, M{}, M{"M": starlark.None}, ``},
+		{"empty map", struct{ M map[string]bool }{M: map[string]bool{}}, M{}, M{"M": set()}, ``},
+		{"map to set", struct{ M map[string]bool }{M: map[string]bool{"x": true}}, M{}, M{"M": set(starlark.String("x"))}, ``},
+		{"map to set with false key", struct{ M map[string]bool }{M: map[string]bool{"x": true, "y": false}}, M{}, M{"M": set(starlark.String("x"))}, ``},
+		{"nil *map", struct{ Mptr *map[string]bool }{}, M{}, M{"Mptr": starlark.None}, ``},
+
+		{"time.Duration encodes as in64", struct{ Ts time.Duration }{Ts: time.Second}, M{}, M{"Ts": starlark.MakeInt(int(time.Second))}, ``},
+		{"chan unsupported", struct{ Ch chan int }{Ch: make(chan int)}, M{}, nil, `unsupported Go type chan int at Ch`},
+		{"chan unsupported ignored", struct {
+			Ch chan int `starlark:"-"`
+		}{Ch: make(chan int)}, M{}, M{}, ``},
 	}
 
 	for _, c := range cases {
