@@ -10,11 +10,16 @@ import (
 	"go.starlark.net/starlark"
 )
 
+type dummyValue struct {
+	starlark.Value
+}
+
 func TestFromStarlark(t *testing.T) {
 	type StrctBool struct {
-		Bptr  *bool
-		B2ptr **bool
-		B     bool
+		Bptr    *bool
+		B2ptr   **bool
+		B       bool
+		Ignored **string `starlark:"-"`
 	}
 
 	type StrctStr struct {
@@ -81,13 +86,17 @@ func TestFromStarlark(t *testing.T) {
 		{"None into non-pointer", M{"I": starlark.None}, &StrctNums{}, nil, `cannot assign None to unsupported field type at I: int`},
 		{"None into slice", M{"i": starlark.None}, &StrctList{}, StrctList{I: nil}, ""},
 		{"None into map", M{"m": starlark.None}, &StrctSet{}, StrctSet{M: nil}, ""},
+		{"Nil starlark value into *bool", M{"bptr": nil}, &StrctBool{}, nil, `nil starlark Value at Bptr`},
+		{"Unknown starlark value into *bool", M{"bptr": dummyValue{starlark.None}}, &StrctBool{}, nil, `unsupported starlark type NoneType (starstruct.dummyValue) at Bptr`},
 
 		{"true into *bool", M{"bptr": starlark.Bool(true)}, &StrctBool{}, StrctBool{Bptr: &truev}, ""},
 		{"true into bool", M{"B": starlark.Bool(true)}, &StrctBool{}, StrctBool{B: true}, ""},
 		{"false into bool", M{"b": starlark.Bool(false)}, &StrctBool{}, StrctBool{B: false}, ""},
 		{"false into *bool", M{"bptr": starlark.Bool(false)}, &StrctBool{}, StrctBool{Bptr: &falsev}, ""},
 		{"true into **bool", M{"b2ptr": starlark.Bool(true)}, &StrctBool{}, nil, `cannot assign Bool to unsupported field type at B2ptr: **bool`},
+		{"true into ignored and b", M{"b": starlark.Bool(true), "ignored": starlark.Bool(true)}, &StrctBool{}, StrctBool{B: true}, ``},
 		{"true into *int", M{"iptr": starlark.Bool(true)}, &StrctNums{}, nil, `cannot assign Bool to unsupported field type at Iptr: *int`},
+		{"true into int", M{"i": starlark.Bool(true)}, &StrctNums{}, nil, `cannot assign Bool to unsupported field type at I: int`},
 
 		{"'a' into string", M{"s": starlark.String("a")}, &StrctStr{}, StrctStr{S: "a"}, ``},
 		{"'a' into *string", M{"sptr": starlark.String("a")}, &StrctStr{}, StrctStr{Sptr: sptr("a")}, ``},
@@ -263,4 +272,23 @@ func TestFromStarlark(t *testing.T) {
 			require.Equal(t, c.want, rv.Elem().Interface())
 		})
 	}
+}
+
+func TestFromStarlarkInvalidDestination(t *testing.T) {
+	var s string
+
+	require.PanicsWithValue(t, `destination value is not a pointer to a struct: string`, func() {
+		_ = FromStarlark(nil, s)
+	})
+	require.PanicsWithValue(t, `destination value is not a pointer to a struct: *string`, func() {
+		_ = FromStarlark(nil, &s)
+	})
+	require.PanicsWithValue(t, `destination value is not a pointer to a struct: nil`, func() {
+		_ = FromStarlark(nil, nil)
+	})
+
+	type T struct{ I int }
+	require.PanicsWithValue(t, `destination value is a nil pointer: *starstruct.T`, func() {
+		_ = FromStarlark(nil, (*T)(nil))
+	})
 }

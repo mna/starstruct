@@ -61,6 +61,9 @@ func ToStarlark(vals any, dst starlark.StringDict) error {
 		strct = strct.Elem()
 	}
 	if strct.Kind() != reflect.Struct {
+		if vals == nil {
+			panic("source value is not a struct or a pointer to a struct: nil")
+		}
 		panic(fmt.Sprintf("source value is not a struct or a pointer to a struct: %s", oriVal.Type()))
 	}
 	if dst == nil {
@@ -249,6 +252,10 @@ func isStructOrPtrType(t reflect.Type) bool {
 	if t.Kind() == reflect.Struct {
 		return true
 	}
+	return isStructPtrType(t)
+}
+
+func isStructPtrType(t reflect.Type) bool {
 	return t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct
 }
 

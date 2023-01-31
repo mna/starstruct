@@ -37,19 +37,20 @@ import (
 // the existing map, keeping existing entries. It then stores each Set key with
 // a true value into the map.
 func FromStarlark(vals starlark.StringDict, dst any) error {
+	if dst == nil {
+		panic("destination value is not a pointer to a struct: nil")
+	}
+
 	rval := reflect.ValueOf(dst)
-	oriVal := rval
-	if rval.Kind() != reflect.Pointer {
+	if !isStructPtrType(rval.Type()) {
 		panic(fmt.Sprintf("destination value is not a pointer to a struct: %s", rval.Type()))
 	}
 	if rval.IsNil() {
-		// TODO: it could allocate the struct?
 		panic(fmt.Sprintf("destination value is a nil pointer: %s", rval.Type()))
 	}
+
+	oriVal := rval
 	rval = rval.Elem()
-	if rval.Kind() != reflect.Struct {
-		panic(fmt.Sprintf("destination value is not a pointer to a struct: %s", oriVal.Type()))
-	}
 	if !rval.CanAddr() || !rval.CanSet() {
 		panic(fmt.Sprintf("destination value is a pointer to an unaddressable or unsettable struct: %s", oriVal.Type()))
 	}
@@ -174,7 +175,7 @@ func fromStarlarkValue(path string, starVal starlark.Value, dst reflect.Value) e
 		if v == nil {
 			return fmt.Errorf("nil starlark Value at %s", path)
 		}
-		return fmt.Errorf("unsupported starlark type %s at %s", v.Type(), path)
+		return fmt.Errorf("unsupported starlark type %s (%T) at %s", v.Type(), v, path)
 	}
 	return nil
 }
@@ -203,7 +204,7 @@ func setFieldBool(path string, fld reflect.Value, b bool) error {
 	}
 
 	if fld.Kind() != reflect.Bool {
-		return fmt.Errorf("cannot assign Bool to non-bool field type at %s: %s", path, fld.Type())
+		return fmt.Errorf("cannot assign Bool to unsupported field type at %s: %s", path, fld.Type())
 	}
 	fld.SetBool(b)
 	return nil
