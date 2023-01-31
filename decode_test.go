@@ -74,6 +74,10 @@ func TestFromStarlark(t *testing.T) {
 		time.Duration
 	}
 
+	type StrctEmbedDurationPtr struct {
+		*time.Duration
+	}
+
 	cases := []struct {
 		name string
 		vals map[string]starlark.Value
@@ -104,6 +108,8 @@ func TestFromStarlark(t *testing.T) {
 		{"'a' into []byte", M{"bs": starlark.String("a")}, &StrctStr{}, StrctStr{Bs: []byte("a")}, ``},
 		{"'a' into *[]byte", M{"bsptr": starlark.String("a")}, &StrctStr{}, StrctStr{BsPtr: bsptr("a")}, ``},
 		{"'a' into **[]byte", M{"bs2ptr": starlark.String("a")}, &StrctStr{}, nil, `cannot assign String to unsupported field type at Bs2Ptr: **[]uint8`},
+		{"'a' into *int", M{"iptr": starlark.String("a")}, &StrctNums{}, nil, `cannot assign String to unsupported field type at Iptr: *int`},
+		{"'a' into int", M{"i": starlark.String("a")}, &StrctNums{}, nil, `cannot assign String to unsupported field type at I: int`},
 
 		{"b'abc' into string", M{"s": starlark.Bytes("abc")}, &StrctStr{}, StrctStr{S: "abc"}, ``},
 		{"b'abc' into *string", M{"sptr": starlark.Bytes("abc")}, &StrctStr{}, StrctStr{Sptr: sptr("abc")}, ``},
@@ -111,6 +117,8 @@ func TestFromStarlark(t *testing.T) {
 		{"b'abc' into []byte", M{"bs": starlark.Bytes("abc")}, &StrctStr{}, StrctStr{Bs: []byte("abc")}, ``},
 		{"b'abv' into *[]byte", M{"bsptr": starlark.Bytes("abc")}, &StrctStr{}, StrctStr{BsPtr: bsptr("abc")}, ``},
 		{"b'abc' into **[]byte", M{"bs2ptr": starlark.Bytes("abc")}, &StrctStr{}, nil, `cannot assign Bytes to unsupported field type at Bs2Ptr: **[]uint8`},
+		{"b'abc' into *int", M{"iptr": starlark.Bytes("abc")}, &StrctNums{}, nil, `cannot assign Bytes to unsupported field type at Iptr: *int`},
+		{"b'abc' into int", M{"i": starlark.Bytes("abc")}, &StrctNums{}, nil, `cannot assign Bytes to unsupported field type at I: int`},
 
 		{"1 into int", M{"i": starlark.MakeInt(1)}, &StrctNums{}, StrctNums{I: 1}, ``},
 		{"2 into int8", M{"int8": starlark.MakeInt(2)}, &StrctNums{}, StrctNums{I8: 2}, ``},
@@ -138,6 +146,8 @@ func TestFromStarlark(t *testing.T) {
 		{"-4 into uint32", M{"u32": starlark.MakeInt(-4)}, &StrctNums{}, nil, `out of range`},
 		{"-5 into uint64", M{"u64": starlark.MakeInt(-5)}, &StrctNums{}, nil, `out of range`},
 		{"-6 into uintptr", M{"up": starlark.MakeInt(-6)}, &StrctNums{}, nil, `out of range`},
+		{"1 into bool", M{"b": starlark.MakeInt(1)}, &StrctBool{}, nil, `cannot assign Int to unsupported field type at B: bool`},
+		{"1 into *bool", M{"bptr": starlark.MakeInt(1)}, &StrctBool{}, nil, `cannot assign Int to unsupported field type at Bptr: *bool`},
 		{"too big into int", M{"i": starlark.MakeUint(math.MaxUint64)}, &StrctNums{}, nil, `out of range`},
 		{"too big into int8", M{"int8": starlark.MakeInt(math.MaxInt8 + 1)}, &StrctNums{}, nil, `out of range`},
 		{"too big into int16", M{"int16": starlark.MakeInt(math.MaxInt16 + 1)}, &StrctNums{}, nil, `out of range`},
@@ -206,6 +216,8 @@ func TestFromStarlark(t *testing.T) {
 		{"-1.0 into uintptr", M{"Up": starlark.Float(-1.0)}, &StrctNums{}, nil, `out of range`},
 		{"-1.0 into float32", M{"f32": starlark.Float(-1.0)}, &StrctNums{}, StrctNums{F32: -1.0}, ``},
 		{"-1.0 into float64", M{"f64": starlark.Float(-1.0)}, &StrctNums{}, StrctNums{F64: -1.0}, ``},
+		{"-1.0 into *bool", M{"bptr": starlark.Float(-1.0)}, &StrctBool{}, nil, `cannot assign Float to unsupported field type at Bptr: *bool`},
+		{"-1.0 into bool", M{"b": starlark.Float(-1.0)}, &StrctBool{}, nil, `cannot assign Float to unsupported field type at B: bool`},
 
 		{"too big into int", M{"i": starlark.Float(math.MaxInt + 1)}, &StrctNums{}, nil, `out of range`},
 		{"too big into int8", M{"int8": starlark.Float(math.MaxInt8 + 1)}, &StrctNums{}, nil, `out of range`},
@@ -240,6 +252,8 @@ func TestFromStarlark(t *testing.T) {
 		{"list mixed values", M{"s": list(starlark.String("a"), starlark.MakeInt(1))}, &StrctList{}, nil, `cannot assign Int to unsupported field type at S[1]: string`},
 		{"list None *StrctBool", M{"strctptr": list(starlark.None, dict(M{"Bptr": starlark.Bool(true)}))}, &StrctList{}, StrctList{StrctPtr: []*StrctBool{nil, {Bptr: &truev}}}, ``},
 		{"list None *string", M{"sptr": list(starlark.None, starlark.None)}, &StrctList{}, StrctList{Sptr: []*string{nil, nil}}, ``},
+		{"list into non-slice", M{"b": list(starlark.Bool(true), starlark.Bool(false))}, &StrctBool{}, nil, `cannot assign List to unsupported field type at B: bool`},
+		{"list into non-slice pointer", M{"bptr": list(starlark.Bool(true), starlark.Bool(false))}, &StrctBool{}, nil, `cannot assign List to unsupported field type at Bptr: *bool`},
 
 		{"tuple int", M{"i": tup(starlark.MakeInt(1), starlark.MakeInt(2), starlark.MakeInt(3))}, &StrctList{}, StrctList{I: []int{1, 2, 3}}, ``},
 		{"tuple string", M{"s": tup(starlark.String("a"), starlark.String("b"), starlark.String("c"))}, &StrctList{}, StrctList{S: []string{"a", "b", "c"}}, ``},
@@ -254,8 +268,11 @@ func TestFromStarlark(t *testing.T) {
 		{"set into *map", M{"mptr": set(starlark.MakeInt(1), starlark.MakeInt(2))}, &StrctSet{}, StrctSet{Mptr: &map[int]bool{1: true, 2: true}}, ``},
 		{"None into *map", M{"mptr": starlark.None}, &StrctSet{Mptr: &map[int]bool{}}, StrctSet{Mptr: nil}, ``},
 		{"set mixed values", M{"m": set(starlark.String("a"), starlark.MakeInt(1))}, &StrctSet{}, nil, `cannot assign Int to unsupported field type at M[1]: string`},
+		{"set into non-map", M{"b": set(starlark.String("a"), starlark.String("b"))}, &StrctBool{}, nil, `cannot assign Set to unsupported field type at B: bool`},
+		{"set into non-map pointer", M{"bptr": set(starlark.String("a"), starlark.String("b"))}, &StrctBool{}, nil, `cannot assign Set to unsupported field type at Bptr: *bool`},
 
 		{"target is embedded non-struct", M{"duration": starlark.MakeInt(1)}, &StrctEmbedDuration{}, nil, `cannot assign Dict to unsupported field type at Duration: time.Duration`},
+		{"target is embedded non-struct pointer", M{"duration": starlark.MakeInt(1)}, &StrctEmbedDurationPtr{}, nil, `cannot assign Dict to unsupported field type at Duration: *time.Duration`},
 	}
 
 	for _, c := range cases {
