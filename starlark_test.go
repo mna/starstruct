@@ -107,6 +107,39 @@ set_admin(admin)
 	}, out)
 }
 
+func TestDeeplyNested(t *testing.T) {
+	const script = `
+x = {
+	"y": {
+		"z": {
+			"vals": 123,
+		}
+	}
+}
+`
+
+	globals := make(starlark.StringDict)
+
+	var th starlark.Thread
+	mod, err := starlark.ExecFile(&th, "test", script, globals)
+	require.NoError(t, err)
+	mergeStringDicts(globals, mod)
+
+	out := struct {
+		X struct {
+			Y struct {
+				Z struct {
+					Vals int
+				}
+			}
+		}
+	}{}
+	want := out
+	want.X.Y.Z.Vals = 123
+	require.NoError(t, starstruct.FromStarlark(globals, &out))
+	require.Equal(t, want, out)
+}
+
 func mergeStringDicts(dst starlark.StringDict, vs ...starlark.StringDict) starlark.StringDict {
 	if dst == nil {
 		dst = make(starlark.StringDict)
