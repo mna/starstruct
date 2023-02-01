@@ -47,6 +47,66 @@ x = x + 1
 	require.Equal(t, S{X: 2}, out)
 }
 
+func TestPartialOverride(t *testing.T) {
+	const script = `
+def set_server(srv):
+	srv["ports"].append(2020)
+
+def set_admin(adm):
+	adm["name"] = "Nitram"
+	adm["Age"] = 44
+	adm["bands"] = adm["bands"].union(["Metallica", "Kreator"])
+	if adm.get("Created") or adm.get("created") or adm.get("-"):
+		found_created = True
+
+set_server(server)
+set_admin(admin)
+`
+
+	globals := make(starlark.StringDict)
+	type Server struct {
+		Addr  string `starlark:"addr"`
+		Ports []int  `starlark:"ports"`
+	}
+	type User struct {
+		Name    string `starlark:"name"`
+		Age     int
+		Created bool     `starlark:"-"`
+		Bands   []string `starlark:"bands,asset"`
+	}
+	type S struct {
+		Server       Server `starlark:"server"`
+		Admin        User   `starlark:"admin"`
+		FoundCreated *bool  `starlark:"found_created"`
+	}
+
+	in := S{
+		Server: Server{Addr: "localhost", Ports: []int{80, 443}},
+		Admin:  User{Name: "Martin", Age: 22, Created: true, Bands: []string{"Slayer"}},
+	}
+	require.NoError(t, starstruct.ToStarlark(in, globals))
+
+	var th starlark.Thread
+	mod, err := starlark.ExecFile(&th, "test", script, globals)
+	require.NoError(t, err)
+	mergeStringDicts(globals, mod)
+
+	var out S
+	require.NoError(t, starstruct.FromStarlark(globals, &out))
+	require.Equal(t, S{
+		Server: Server{
+			Addr:  "localhost",
+			Ports: []int{80, 443, 2020},
+		},
+		Admin: User{
+			Name:  "Nitram",
+			Age:   44,
+			Bands: []string{"Slayer", "Metallica", "Kreator"},
+		},
+		FoundCreated: nil,
+	}, out)
+}
+
 func mergeStringDicts(dst starlark.StringDict, vs ...starlark.StringDict) starlark.StringDict {
 	if dst == nil {
 		dst = make(starlark.StringDict)
@@ -59,6 +119,7 @@ func mergeStringDicts(dst starlark.StringDict, vs ...starlark.StringDict) starla
 	return dst
 }
 
+// nolint: deadcode,unused
 func printGlobals(gs starlark.StringDict) {
 	fmt.Println("\nGlobals:")
 	for _, name := range gs.Keys() {
