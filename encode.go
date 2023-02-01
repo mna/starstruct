@@ -74,6 +74,8 @@ func ToStarlark(vals any, dst starlark.StringDict) error {
 	return walkStructEncode("", strct, stringDictValue{dst})
 }
 
+// TODO: add support for starlark.Value fields, to copy over as-is?
+
 func walkStructEncode(path string, strct reflect.Value, dst dictGetSetter) error {
 	strctTyp := strct.Type()
 	count := strctTyp.NumField()
