@@ -123,7 +123,7 @@ x = {
 	var th starlark.Thread
 	mod, err := starlark.ExecFile(&th, "test", script, globals)
 	require.NoError(t, err)
-	mergeStringDicts(globals, mod)
+	globals = mergeStringDicts(nil, mod)
 
 	out := struct {
 		X struct {
