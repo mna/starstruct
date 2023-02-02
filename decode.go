@@ -36,6 +36,16 @@ import (
 // unmarshaling: if the map is nil, it allocates a new map. Otherwise it reuses
 // the existing map, keeping existing entries. It then stores each Set key with
 // a true value into the map.
+//
+// Embedded fields in structs are supported as follows:
+//   - The field must be exported
+//   - The type of the field must be a struct or a pointer to a struct
+//   - If the embedded field has no starlark name specified in its struct tag,
+//     the starlark values are decoded into the fields of the embedded struct as
+//     if they were part of the parent struct.
+//   - If the embedded field has a starlark name specified in its struct tag
+//     (and that name is not "-"), the starlark dictionary corresponding to that
+//     name is decoded to that embedded struct.
 func FromStarlark(vals starlark.StringDict, dst any) error {
 	if dst == nil {
 		panic("destination value is not a pointer to a struct: nil")
@@ -88,8 +98,6 @@ func walkStructDecode(path string, strct reflect.Value, vals dictGetSetter) (did
 		// struct with the current vals.
 		if nm == "" {
 			if fldTyp.Anonymous {
-				// TODO: this effectively enforces that embedded fields are structs,
-				// document it or support any embedded field type
 				ok, err := setFieldDict(path, fld, vals)
 				if err != nil {
 					return didSet, err
