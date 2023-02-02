@@ -276,5 +276,5 @@ func (t tagOpt) shift() tagOpt {
 	if len(t) <= 1 {
 		return tagOpt(nil)
 	}
-	return tagOpt(t[1:])
+	return t[1:]
 }
