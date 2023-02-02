@@ -263,6 +263,10 @@ func isStructPtrType(t reflect.Type) bool {
 	return t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct
 }
 
+func isTOrPtrTType(t, T reflect.Type) bool {
+	return t == T || (t.Kind() == reflect.Pointer && t.Elem() == T)
+}
+
 type tagOpt []string
 
 func (t tagOpt) current() string {

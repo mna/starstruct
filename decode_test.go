@@ -78,6 +78,13 @@ func TestFromStarlark(t *testing.T) {
 		*time.Duration
 	}
 
+	type StrctStarval struct {
+		Star     starlark.Value
+		StarPtr  *starlark.Value
+		Star2Ptr **starlark.Value
+		NotStar  dummyValue
+	}
+
 	cases := []struct {
 		name string
 		vals map[string]starlark.Value
@@ -270,6 +277,12 @@ func TestFromStarlark(t *testing.T) {
 		{"set mixed values", M{"m": set(starlark.String("a"), starlark.MakeInt(1))}, &StrctSet{}, nil, `cannot assign Int to unsupported field type at M[1]: string`},
 		{"set into non-map", M{"b": set(starlark.String("a"), starlark.String("b"))}, &StrctBool{}, nil, `cannot assign Set to unsupported field type at B: bool`},
 		{"set into non-map pointer", M{"bptr": set(starlark.String("a"), starlark.String("b"))}, &StrctBool{}, nil, `cannot assign Set to unsupported field type at Bptr: *bool`},
+
+		{"decode into starlark value", M{"star": starlark.None}, &StrctStarval{}, StrctStarval{Star: starlark.None}, ``},
+		{"decode into starlark value pointer", M{"starptr": starlark.MakeInt(1)}, &StrctStarval{}, StrctStarval{StarPtr: starptr(starlark.MakeInt(1))}, ``},
+		{"decode into starlark **Value", M{"star2ptr": starlark.MakeInt(1)}, &StrctStarval{}, nil, `cannot assign Int to unsupported field type at Star2Ptr: **starlark.Value`},
+		{"decode into wrapped starlark value interface", M{"notstar": starlark.MakeInt(1)}, &StrctStarval{}, nil, `cannot assign Int to unsupported field type at NotStar: starstruct.dummyValue`},
+		{"decode into embedded starlark value", M{"anything": starlark.MakeInt(1)}, &dummyValue{}, nil, `cannot assign Dict to unsupported field type at Value: starlark.Value`},
 
 		{"target is embedded non-struct", M{"duration": starlark.MakeInt(1)}, &StrctEmbedDuration{}, nil, `cannot assign Dict to unsupported field type at Duration: time.Duration`},
 		{"target is embedded non-struct pointer", M{"duration": starlark.MakeInt(1)}, &StrctEmbedDurationPtr{}, nil, `cannot assign Dict to unsupported field type at Duration: *time.Duration`},

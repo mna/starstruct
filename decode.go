@@ -23,6 +23,9 @@ import (
 //   - Tuple    => slice of any supported Go type
 //   - Set      => map[T]bool or []T where T is any supported Go type
 //
+// In addition to those conversions, if the Go type is starlark.Value (or a
+// pointer to that type), then the starlark value is assigned as-is.
+//
 // It panics if dst is not a non-nil pointer to an addressable and settable
 // struct. If a target field does not exist in the starlark dictionary, it is
 // unmodified.
@@ -70,8 +73,11 @@ func FromStarlark(vals starlark.StringDict, dst any) error {
 
 // TODO: maybe add support for a "rest" map[string]starlark.Value for
 // dictionary values that were not decoded to fields?
-// TODO: add support for starlark.Value fields, to store the value as-is?
 // TODO: add support for custom decoders, via a func(path, starVal, dstVal) (bool, error)?
+
+type ignore struct{ x starlark.Value }
+
+var starlarkValueType = reflect.TypeOf(ignore{}).Field(0).Type
 
 func walkStructDecode(path string, strct reflect.Value, vals dictGetSetter) (didSet bool, err error) {
 	strctTyp := strct.Type()
@@ -133,6 +139,15 @@ func walkStructDecode(path string, strct reflect.Value, vals dictGetSetter) (did
 }
 
 func fromStarlarkValue(path string, starVal starlark.Value, dst reflect.Value) error {
+	// if destination is starlark.Value interface (or a pointer to it), assign
+	// it directly, as-is.
+	if t := dst.Type(); isTOrPtrTType(t, starlarkValueType) {
+		if err := setFieldStarlark(path, dst, starVal); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	switch v := starVal.(type) {
 	case starlark.NoneType:
 		if err := setFieldNone(path, dst); err != nil {
@@ -198,6 +213,28 @@ func setFieldNone(path string, fld reflect.Value) error {
 		return fmt.Errorf("cannot assign None to unsupported field type at %s: %s", path, fld.Type())
 	}
 	fld.Set(reflect.Zero(fld.Type()))
+	return nil
+}
+
+func setFieldStarlark(path string, fld reflect.Value, v starlark.Value) error {
+	// support a single-level of indirection for consistency with other types
+	if fld.Kind() == reflect.Pointer {
+		ptrToTyp := fld.Type().Elem()
+		if ptrToTyp != starlarkValueType {
+			return fmt.Errorf("cannot assign starlark.Value to unsupported field type at %s: %s", path, fld.Type())
+		}
+
+		if fld.IsNil() {
+			// allocate the *starlark.Value value
+			fld.Set(reflect.New(ptrToTyp))
+		}
+		fld = fld.Elem()
+	}
+
+	if fld.Type() != starlarkValueType {
+		return fmt.Errorf("cannot assign starlark.Value to unsupported field type at %s: %s", path, fld.Type())
+	}
+	fld.Set(reflect.ValueOf(v))
 	return nil
 }
 
