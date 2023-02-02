@@ -61,6 +61,7 @@ func FromStarlark(vals starlark.StringDict, dst any) error {
 // TODO: maybe add support for a "rest" map[string]starlark.Value for
 // dictionary values that were not decoded to fields?
 // TODO: add support for starlark.Value fields, to store the value as-is?
+// TODO: add support for custom decoders, via a func(path, starVal, dstVal) (bool, error)?
 
 func walkStructDecode(path string, strct reflect.Value, vals dictGetSetter) (didSet bool, err error) {
 	strctTyp := strct.Type()

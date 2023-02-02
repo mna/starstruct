@@ -75,6 +75,8 @@ func ToStarlark(vals any, dst starlark.StringDict) error {
 }
 
 // TODO: add support for starlark.Value fields, to copy over as-is?
+// TODO: add support for custom encoders, via a func(path, srcVal) (starVal, bool, error)?
+// TODO: for both encoder/decoder, collect all errors? See if Go's new multi-error support could be useful.
 
 func walkStructEncode(path string, strct reflect.Value, dst dictGetSetter) error {
 	strctTyp := strct.Type()
