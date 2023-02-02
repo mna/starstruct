@@ -20,6 +20,8 @@ func TestToStarlark(t *testing.T) {
 	type ChanStruct struct {
 		Ch chan int
 	}
+	starPtr := starptr(starlark.MakeInt(2))
+	star2ptr := &starPtr
 
 	cases := []struct {
 		name string
@@ -151,6 +153,14 @@ func TestToStarlark(t *testing.T) {
 		{"unsupported embedded field type", struct {
 			time.Duration
 		}{Duration: time.Hour}, M{}, nil, `embedded field at Duration of type time.Duration must be a struct or a pointer to a struct`},
+
+		{"nil starlark value", struct{ V starlark.Value }{}, M{}, M{"V": starlark.None}, ``},
+		{"nil starlark value pointer", struct{ V *starlark.Value }{}, M{}, M{"V": starlark.None}, ``},
+		{"nil **starlark.Value", struct{ V **starlark.Value }{}, M{}, nil, `unsupported Go type **starlark.Value at V`},
+		{"starlark value", struct{ V starlark.Value }{V: starlark.MakeInt(1)}, M{}, M{"V": starlark.MakeInt(1)}, ``},
+		{"starlark value pointer", struct{ V *starlark.Value }{V: starptr(starlark.String("a"))}, M{}, M{"V": starlark.String("a")}, ``},
+		{"**starlark.Value", struct{ V **starlark.Value }{V: star2ptr}, M{}, nil, `unsupported Go type **starlark.Value at V`},
+		{"wrapped starlark value", struct{ V dummyValue }{V: dummyValue{starlark.MakeInt(1)}}, M{}, nil, `embedded field at V.Value of type starlark.Value must be a struct or a pointer to a struct`},
 	}
 
 	for _, c := range cases {

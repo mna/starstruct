@@ -25,6 +25,9 @@ import (
 //   - slice of any supported Go type => List
 //   - map[T]bool => Set
 //
+// In addition to those conversions, if the Go type is starlark.Value (or a
+// pointer to that type), then the starlark value is transferred as-is.
+//
 // Conversion can be further controlled by using struct tags. Besides the
 // naming of the starlark variable, a comma-separated argument can be provided
 // to control the target encoding. The following arguments are supported:
@@ -74,7 +77,6 @@ func ToStarlark(vals any, dst starlark.StringDict) error {
 	return walkStructEncode("", strct, stringDictValue{dst})
 }
 
-// TODO: add support for starlark.Value fields, to copy over as-is?
 // TODO: add support for custom encoders, via a func(path, srcVal) (starVal, bool, error)?
 // TODO: for both encoder/decoder, collect all errors? See if Go's new multi-error support could be useful.
 
@@ -148,8 +150,9 @@ func convertGoValue(path string, goVal reflect.Value, opts tagOpt) (starlark.Val
 		isNil = goVal.IsNil()
 		goVal = goVal.Elem()
 	}
-	// map and slice can also be nil
-	if goVal.Kind() == reflect.Map || goVal.Kind() == reflect.Slice {
+	// map and slice can also be nil, and starlark.Value interface
+	if goVal.Kind() == reflect.Map || goVal.Kind() == reflect.Slice ||
+		(goVal.Kind() == reflect.Interface && goVal.Type() == starlarkValueType) {
 		isNil = goVal.IsNil()
 	}
 
@@ -157,6 +160,8 @@ func convertGoValue(path string, goVal reflect.Value, opts tagOpt) (starlark.Val
 	switch {
 	case isNil:
 		return starlark.None, nil
+	case goVal.Type() == starlarkValueType:
+		return goVal.Interface().(starlark.Value), nil
 	case goVal.Kind() == reflect.Bool:
 		return starlark.Bool(goVal.Bool()), nil
 	case goVal.Kind() == reflect.Float32 || goVal.Kind() == reflect.Float64:

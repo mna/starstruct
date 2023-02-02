@@ -75,6 +75,7 @@ func FromStarlark(vals starlark.StringDict, dst any) error {
 // dictionary values that were not decoded to fields?
 // TODO: add support for custom decoders, via a func(path, starVal, dstVal) (bool, error)?
 
+// nolint: unused
 type ignore struct{ x starlark.Value }
 
 var starlarkValueType = reflect.TypeOf(ignore{}).Field(0).Type
