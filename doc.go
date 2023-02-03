@@ -26,7 +26,7 @@
 //   - "-" => `starlark:"#-#,asbytes"`
 //   - "*" => `starlark:"#*#,asbytes"`
 //   - "," => `starlark:"#,#,asbytes"`
-//   - "r##" => `starlark:"###r#####,asbytes"`
+//   - "a##" => `starlark:"###a#####,asbytes"` (3 pounds surrounding the name)
 //   - "##"##" => `starlark:"###\\x23#\\\"#####,asbytes"` (3 pounds as leading
 //     and trailing, then a doubly-escaped pound (\\x23) so that only 3 pounds are
 //     counted as surrounding chars, then the second pound as normal, then an
