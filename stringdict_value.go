@@ -18,7 +18,7 @@ type stringDictValue struct {
 	starlark.StringDict
 }
 
-func (v stringDictValue) Type() string          { return "stringDictValue" }
+func (v stringDictValue) Type() string          { return "StringDict" }
 func (v stringDictValue) Truth() starlark.Bool  { return starlark.Bool(true) }
 func (v stringDictValue) Hash() (uint32, error) { return 0, nil }
 func (v stringDictValue) Get(k starlark.Value) (starlark.Value, bool, error) {

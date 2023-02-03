@@ -123,11 +123,7 @@ func (d *decoder) walkStructDecode(path string, strct reflect.Value, vals dictGe
 		// struct with the current vals.
 		if nm == "" {
 			if fldTyp.Anonymous {
-				ok, err := d.setFieldDict(path, fld, vals)
-				if err != nil {
-					return didSet, err
-				}
-				if ok {
+				if ok := d.setFieldDict(path, fld, vals); ok {
 					didSet = true
 				}
 				continue
@@ -150,97 +146,60 @@ func (d *decoder) walkStructDecode(path string, strct reflect.Value, vals dictGe
 		// at this point, the struct field has a matching starlark value, so it
 		// will either set it or return an error.
 		didSet = true
-		if err := d.fromStarlarkValue(path, matchingVal, fld); err != nil {
-			return didSet, err
-		}
+		d.fromStarlarkValue(path, matchingVal, fld)
 	}
-	return didSet, nil
+	return didSet
 }
 
 func (d *decoder) fromStarlarkValue(path string, starVal starlark.Value, dst reflect.Value) {
 	// if destination is starlark.Value interface (or a pointer to it), assign
 	// it directly, as-is.
 	if t := dst.Type(); isTOrPtrTType(t, starlarkValueType) {
-		if err := d.setFieldStarlark(path, dst, starVal); err != nil {
-			return err
-		}
-		return nil
+		d.setFieldStarlark(path, dst, starVal)
+		return
 	}
 
 	switch v := starVal.(type) {
 	case starlark.NoneType:
-		if err := d.setFieldNone(path, dst); err != nil {
-			return err
-		}
-
+		d.setFieldNone(path, dst)
 	case starlark.Bool:
-		if err := d.setFieldBool(path, dst, bool(v)); err != nil {
-			return err
-		}
-
+		d.setFieldBool(path, dst, v)
 	case starlark.Bytes:
-		if err := d.setFieldBytes(path, dst, v); err != nil {
-			return err
-		}
-
+		d.setFieldBytes(path, dst, v)
 	case starlark.String:
-		if err := d.setFieldString(path, dst, v); err != nil {
-			return err
-		}
-
+		d.setFieldString(path, dst, v)
 	case starlark.Int:
-		if err := d.setFieldInt(path, dst, v); err != nil {
-			return err
-		}
-
+		d.setFieldInt(path, dst, v)
 	case starlark.Float:
-		if err := d.setFieldFloat(path, dst, v); err != nil {
-			return err
-		}
-
+		d.setFieldFloat(path, dst, v)
 	case *starlark.Dict:
-		if _, err := d.setFieldDict(path, dst, v); err != nil {
-			return err
-		}
-
+		d.setFieldDict(path, dst, v)
 	case *starlark.List:
-		if err := d.setFieldList(path, dst, v); err != nil {
-			return err
-		}
-
+		d.setFieldList(path, dst, v)
 	case starlark.Tuple:
-		if err := d.setFieldTuple(path, dst, v); err != nil {
-			return err
-		}
-
+		d.setFieldTuple(path, dst, v)
 	case *starlark.Set:
-		if err := d.setFieldSet(path, dst, v); err != nil {
-			return err
-		}
-
+		d.setFieldSet(path, dst, v)
 	default:
-		if v == nil {
-			return fmt.Errorf("nil starlark Value at %s", path)
-		}
-		return fmt.Errorf("unsupported starlark type %s (%T) at %s", v.Type(), v, path)
+		d.recordTypeErr(path, v, dst)
 	}
-	return nil
 }
 
-func (d *decoder) setFieldNone(path string, fld reflect.Value) error {
+func (d *decoder) setFieldNone(path string, fld reflect.Value) {
 	if fld.Kind() != reflect.Pointer && fld.Kind() != reflect.Slice && fld.Kind() != reflect.Map {
-		return fmt.Errorf("cannot assign None to unsupported field type at %s: %s", path, fld.Type())
+		d.recordTypeErr(path, starlark.None, fld)
+		return
 	}
 	fld.Set(reflect.Zero(fld.Type()))
-	return nil
 }
 
-func (d *decoder) setFieldStarlark(path string, fld reflect.Value, v starlark.Value) error {
+func (d *decoder) setFieldStarlark(path string, fld reflect.Value, v starlark.Value) {
 	// support a single-level of indirection for consistency with other types
 	if fld.Kind() == reflect.Pointer {
 		ptrToTyp := fld.Type().Elem()
 		if ptrToTyp != starlarkValueType {
-			return fmt.Errorf("cannot assign starlark.Value to unsupported field type at %s: %s", path, fld.Type())
+			d.recordTypeErr(path, v, fld)
+			return
 		}
 
 		if fld.IsNil() {
@@ -251,18 +210,19 @@ func (d *decoder) setFieldStarlark(path string, fld reflect.Value, v starlark.Va
 	}
 
 	if fld.Type() != starlarkValueType {
-		return fmt.Errorf("cannot assign starlark.Value to unsupported field type at %s: %s", path, fld.Type())
+		d.recordTypeErr(path, v, fld)
+		return
 	}
 	fld.Set(reflect.ValueOf(v))
-	return nil
 }
 
-func (d *decoder) setFieldBool(path string, fld reflect.Value, b bool) error {
+func (d *decoder) setFieldBool(path string, fld reflect.Value, b starlark.Bool) {
 	// support a single-level of indirection, in case the value may be None
 	if fld.Kind() == reflect.Pointer {
 		ptrToTyp := fld.Type().Elem()
 		if ptrToTyp.Kind() != reflect.Bool {
-			return fmt.Errorf("cannot assign Bool to unsupported field type at %s: %s", path, fld.Type())
+			d.recordTypeErr(path, b, fld)
+			return
 		}
 
 		if fld.IsNil() {
@@ -273,19 +233,20 @@ func (d *decoder) setFieldBool(path string, fld reflect.Value, b bool) error {
 	}
 
 	if fld.Kind() != reflect.Bool {
-		return fmt.Errorf("cannot assign Bool to unsupported field type at %s: %s", path, fld.Type())
+		d.recordTypeErr(path, b, fld)
+		return
 	}
-	fld.SetBool(b)
-	return nil
+	fld.SetBool(bool(b))
 }
 
-func (d *decoder) setFieldInt(path string, fld reflect.Value, i starlark.Int) error {
+func (d *decoder) setFieldInt(path string, fld reflect.Value, i starlark.Int) {
 	// support a single-level of indirection, in case the value may be None
 	if fld.Kind() == reflect.Pointer {
 		ptrToTyp := fld.Type().Elem()
 		// can be anything between Int and Float64
 		if ptrToTyp.Kind() < reflect.Int || ptrToTyp.Kind() > reflect.Float64 {
-			return fmt.Errorf("cannot assign Int to unsupported field type at %s: %s", path, fld.Type())
+			d.recordTypeErr(path, i, fld)
+			return
 		}
 
 		if fld.IsNil() {
@@ -296,7 +257,8 @@ func (d *decoder) setFieldInt(path string, fld reflect.Value, i starlark.Int) er
 	}
 
 	if fld.Kind() < reflect.Int || fld.Kind() > reflect.Float64 {
-		return fmt.Errorf("cannot assign Int to unsupported field type at %s: %s", path, fld.Type())
+		d.recordTypeErr(path, i, fld)
+		return
 	}
 	switch fld.Kind() {
 	case reflect.Float32, reflect.Float64:
@@ -304,21 +266,22 @@ func (d *decoder) setFieldInt(path string, fld reflect.Value, i starlark.Int) er
 		fld.SetFloat(f)
 	default:
 		if err := starlark.AsInt(i, fld.Addr().Interface()); err != nil {
-			return fmt.Errorf("cannot assign Int at %s: %w", path, err)
+			d.recordNumberErr(path, i, fld, NumOutOfRange)
+			return
 		}
 	}
-	return nil
 }
 
 var epsilon = float64(math.Nextafter32(1, 2) - 1)
 
-func (d *decoder) setFieldFloat(path string, fld reflect.Value, f starlark.Float) error {
+func (d *decoder) setFieldFloat(path string, fld reflect.Value, f starlark.Float) {
 	// support a single-level of indirection, in case the value may be None
 	if fld.Kind() == reflect.Pointer {
 		ptrToTyp := fld.Type().Elem()
 		// can be anything between Int and Float64
 		if ptrToTyp.Kind() < reflect.Int || ptrToTyp.Kind() > reflect.Float64 {
-			return fmt.Errorf("cannot assign Float to unsupported field type at %s: %s", path, fld.Type())
+			d.recordTypeErr(path, f, fld)
+			return
 		}
 
 		if fld.IsNil() {
@@ -329,7 +292,8 @@ func (d *decoder) setFieldFloat(path string, fld reflect.Value, f starlark.Float
 	}
 
 	if fld.Kind() < reflect.Int || fld.Kind() > reflect.Float64 {
-		return fmt.Errorf("cannot assign Float to unsupported field type at %s: %s", path, fld.Type())
+		d.recordTypeErr(path, f, fld)
+		return
 	}
 
 	fv, _ := starlark.AsFloat(f)
@@ -338,7 +302,8 @@ func (d *decoder) setFieldFloat(path string, fld reflect.Value, f starlark.Float
 	case reflect.Float32:
 		// NaN and Inf can convert to float32 without issue
 		if !math.IsNaN(fv) && !math.IsInf(fv, 0) && math.Abs(float64(float32(fv))-fv) > epsilon {
-			return fmt.Errorf("cannot assign Float at %s: value cannot be exactly represented", path)
+			d.recordNumberErr(path, f, fld, NumCannotExactlyRepresent)
+			return
 		}
 		fld.SetFloat(fv)
 
@@ -347,69 +312,81 @@ func (d *decoder) setFieldFloat(path string, fld reflect.Value, f starlark.Float
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		if math.IsNaN(fv) || math.IsInf(fv, 0) || frac != 0 {
-			return fmt.Errorf("cannot assign Float at %s: value cannot be exactly represented", path)
+			d.recordNumberErr(path, f, fld, NumCannotExactlyRepresent)
+			return
 		}
 
 		switch fld.Kind() {
 		case reflect.Int:
 			if math.Abs(float64(int(integer))-integer) > epsilon {
-				return fmt.Errorf("cannot assign Float at %s: value out of range", path)
+				d.recordNumberErr(path, f, fld, NumOutOfRange)
+				return
 			}
 		case reflect.Int8:
 			if math.Abs(float64(int8(integer))-integer) > epsilon {
-				return fmt.Errorf("cannot assign Float at %s: value out of range", path)
+				d.recordNumberErr(path, f, fld, NumOutOfRange)
+				return
 			}
 		case reflect.Int16:
 			if math.Abs(float64(int16(integer))-integer) > epsilon {
-				return fmt.Errorf("cannot assign Float at %s: value out of range", path)
+				d.recordNumberErr(path, f, fld, NumOutOfRange)
+				return
 			}
 		case reflect.Int32:
 			if math.Abs(float64(int32(integer))-integer) > epsilon {
-				return fmt.Errorf("cannot assign Float at %s: value out of range", path)
+				d.recordNumberErr(path, f, fld, NumOutOfRange)
+				return
 			}
 		case reflect.Int64:
 			if math.Abs(float64(int64(integer))-integer) > epsilon {
-				return fmt.Errorf("cannot assign Float at %s: value out of range", path)
+				d.recordNumberErr(path, f, fld, NumOutOfRange)
+				return
 			}
 		}
 		fld.SetInt(int64(fv))
 
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		if math.IsNaN(fv) || math.IsInf(fv, 0) || frac != 0 {
-			return fmt.Errorf("cannot assign Float at %s: value cannot be exactly represented", path)
+			d.recordNumberErr(path, f, fld, NumCannotExactlyRepresent)
+			return
 		}
 		if integer < 0 {
-			return fmt.Errorf("cannot assign Float at %s: value out of range", path)
+			d.recordNumberErr(path, f, fld, NumOutOfRange)
+			return
 		}
 
 		switch fld.Kind() {
 		case reflect.Uint:
 			if math.Abs(float64(uint(integer))-integer) > epsilon {
-				return fmt.Errorf("cannot assign Float at %s: value out of range", path)
+				d.recordNumberErr(path, f, fld, NumOutOfRange)
+				return
 			}
 		case reflect.Uintptr:
 			if math.Abs(float64(uintptr(integer))-integer) > epsilon {
-				return fmt.Errorf("cannot assign Float at %s: value out of range", path)
+				d.recordNumberErr(path, f, fld, NumOutOfRange)
+				return
 			}
 		case reflect.Uint8:
 			if math.Abs(float64(uint8(integer))-integer) > epsilon {
-				return fmt.Errorf("cannot assign Float at %s: value out of range", path)
+				d.recordNumberErr(path, f, fld, NumOutOfRange)
+				return
 			}
 		case reflect.Uint16:
 			if math.Abs(float64(uint16(integer))-integer) > epsilon {
-				return fmt.Errorf("cannot assign Float at %s: value out of range", path)
+				d.recordNumberErr(path, f, fld, NumOutOfRange)
+				return
 			}
 		case reflect.Uint32:
 			if math.Abs(float64(uint32(integer))-integer) > epsilon {
-				return fmt.Errorf("cannot assign Float at %s: value out of range", path)
+				d.recordNumberErr(path, f, fld, NumOutOfRange)
+				return
 			}
 		}
 		fld.SetUint(uint64(integer))
 	}
-	return nil
 }
 
-func (d *decoder) setFieldDict(path string, fld reflect.Value, dict dictGetSetter) (didSet bool, err error) {
+func (d *decoder) setFieldDict(path string, fld reflect.Value, dict dictGetSetter) (didSet bool) {
 	var ptrToStrct reflect.Value
 
 	// support a single-level of indirection, in case the value may be None
@@ -418,7 +395,8 @@ func (d *decoder) setFieldDict(path string, fld reflect.Value, dict dictGetSette
 		ptrToTyp := fld.Type().Elem()
 		// must be a struct
 		if ptrToTyp.Kind() != reflect.Struct {
-			return didSet, fmt.Errorf("cannot assign Dict to unsupported field type at %s: %s", path, fld.Type())
+			d.recordTypeErr(path, dict, fld)
+			return didSet
 		}
 
 		if fld.IsNil() {
@@ -430,29 +408,31 @@ func (d *decoder) setFieldDict(path string, fld reflect.Value, dict dictGetSette
 	}
 
 	if fld.Kind() != reflect.Struct {
-		return didSet, fmt.Errorf("cannot assign Dict to unsupported field type at %s: %s", path, fld.Type())
+		d.recordTypeErr(path, dict, fld)
+		return didSet
 	}
-	didSet, err = d.walkStructDecode(path, fld, dict)
+	didSet = d.walkStructDecode(path, fld, dict)
 	if didSet && ptrToStrct.Kind() == reflect.Pointer {
 		ptrToStrct.Set(fld.Addr())
 	}
-	return didSet, err
+	return didSet
 }
 
-func (d *decoder) setFieldList(path string, fld reflect.Value, list *starlark.List) error {
-	return d.setFieldIterator(path, "List", fld, list)
+func (d *decoder) setFieldList(path string, fld reflect.Value, list *starlark.List) {
+	d.setFieldIterator(path, fld, list)
 }
 
-func (d *decoder) setFieldTuple(path string, fld reflect.Value, tup starlark.Tuple) error {
-	return d.setFieldIterator(path, "Tuple", fld, tup)
+func (d *decoder) setFieldTuple(path string, fld reflect.Value, tup starlark.Tuple) {
+	d.setFieldIterator(path, fld, tup)
 }
 
 type iterable interface {
+	starlark.Value
 	starlark.Iterable
 	Len() int
 }
 
-func (d *decoder) setFieldIterator(path, label string, fld reflect.Value, iter iterable) error {
+func (d *decoder) setFieldIterator(path string, fld reflect.Value, iter iterable) {
 	// support a single-level of indirection, in case the value may be None (even
 	// though it wouldn't be necessary as slice can be nil, but for consistency
 	// with other types)
@@ -461,7 +441,8 @@ func (d *decoder) setFieldIterator(path, label string, fld reflect.Value, iter i
 
 		// must be a slice
 		if ptrToTyp.Kind() != reflect.Slice {
-			return fmt.Errorf("cannot assign %s to unsupported field type at %s: %s", label, path, fld.Type())
+			d.recordTypeErr(path, iter, fld)
+			return
 		}
 
 		if fld.IsNil() {
@@ -472,7 +453,8 @@ func (d *decoder) setFieldIterator(path, label string, fld reflect.Value, iter i
 	}
 
 	if fld.Kind() != reflect.Slice {
-		return fmt.Errorf("cannot assign %s to unsupported field type at %s: %s", label, path, fld.Type())
+		d.recordTypeErr(path, iter, fld)
+		return
 	}
 	elemTyp := fld.Type().Elem()
 
@@ -482,7 +464,7 @@ func (d *decoder) setFieldIterator(path, label string, fld reflect.Value, iter i
 		// JSON array into a slice, Unmarshal replaces the slice with a new empty
 		// slice.
 		fld.Set(reflect.MakeSlice(reflect.SliceOf(elemTyp), 0, 0))
-		return nil
+		return
 	}
 
 	if count > fld.Cap() {
@@ -498,21 +480,19 @@ func (d *decoder) setFieldIterator(path, label string, fld reflect.Value, iter i
 	var i int
 	for it.Next(&newVal) {
 		newElem := reflect.New(elemTyp).Elem()
-		if err := d.fromStarlarkValue(fmt.Sprintf("%s[%d]", path, i), newVal, newElem); err != nil {
-			return err
-		}
+		d.fromStarlarkValue(fmt.Sprintf("%s[%d]", path, i), newVal, newElem)
 		fld.Set(reflect.Append(fld, newElem))
 		i++
 	}
-	return nil
 }
 
 var trueValue = reflect.ValueOf(true)
 
-func (d *decoder) setFieldSet(path string, fld reflect.Value, set *starlark.Set) error {
+func (d *decoder) setFieldSet(path string, fld reflect.Value, set *starlark.Set) {
 	if fldTyp := fld.Type(); fldTyp.Kind() == reflect.Slice || fldTyp.Kind() == reflect.Pointer && fldTyp.Elem().Kind() == reflect.Slice {
 		// same as decoding a List/Tuple
-		return d.setFieldIterator(path, "Set", fld, set)
+		d.setFieldIterator(path, fld, set)
+		return
 	}
 
 	// support a single-level of indirection, in case the value may be None (even
@@ -522,7 +502,8 @@ func (d *decoder) setFieldSet(path string, fld reflect.Value, set *starlark.Set)
 		ptrToTyp := fld.Type().Elem()
 
 		if !isSetMapType(ptrToTyp) {
-			return fmt.Errorf("cannot assign Set to unsupported field type at %s: %s", path, fld.Type())
+			d.recordTypeErr(path, set, fld)
+			return
 		}
 
 		if fld.IsNil() {
@@ -533,7 +514,8 @@ func (d *decoder) setFieldSet(path string, fld reflect.Value, set *starlark.Set)
 	}
 
 	if !isSetMapType(fld.Type()) {
-		return fmt.Errorf("cannot assign Set to unsupported field type at %s: %s", path, fld.Type())
+		d.recordTypeErr(path, set, fld)
+		return
 	}
 	keyTyp, elemTyp := fld.Type().Key(), fld.Type().Elem()
 
@@ -553,13 +535,10 @@ func (d *decoder) setFieldSet(path string, fld reflect.Value, set *starlark.Set)
 	var i int
 	for it.Next(&newVal) {
 		newKey := reflect.New(keyTyp).Elem()
-		if err := d.fromStarlarkValue(fmt.Sprintf("%s[%d]", path, i), newVal, newKey); err != nil {
-			return err
-		}
+		d.fromStarlarkValue(fmt.Sprintf("%s[%d]", path, i), newVal, newKey)
 		fld.SetMapIndex(newKey, trueValue)
 		i++
 	}
-	return nil
 }
 
 func (d *decoder) setFieldBytes(path string, fld reflect.Value, s starlark.Bytes) {
@@ -578,7 +557,7 @@ func (d *decoder) setFieldBytesOrString(path string, fld reflect.Value, v starla
 		ptrToTyp := fld.Type().Elem()
 		byteSlice = isByteSliceType(ptrToTyp)
 		if ptrToTyp.Kind() != reflect.String && !byteSlice {
-			d.recordErr(path, v, fld)
+			d.recordTypeErr(path, v, fld)
 			return
 		}
 
@@ -590,7 +569,7 @@ func (d *decoder) setFieldBytesOrString(path string, fld reflect.Value, v starla
 	}
 
 	if fld.Kind() != reflect.String && !byteSlice {
-		d.recordErr(path, v, fld)
+		d.recordTypeErr(path, v, fld)
 		return
 	}
 	if byteSlice {
@@ -604,14 +583,27 @@ func (d *decoder) setFieldBytesOrString(path string, fld reflect.Value, v starla
 // reached.
 type tooManyErrs struct{}
 
-func (d *decoder) recordErr(path string, starVal starlark.Value, goVal reflect.Value) {
-	err := &Error{
+func (d *decoder) recordTypeErr(path string, starVal starlark.Value, goVal reflect.Value) {
+	err := &TypeError{
 		Op:      OpFromStarlark,
 		Path:    path,
 		StarVal: starVal,
 		GoVal:   goVal,
 	}
+	d.recordErr(err)
+}
 
+func (d *decoder) recordNumberErr(path string, starNum starlark.Value, goVal reflect.Value, reason NumberFailReason) {
+	err := &NumberError{
+		Reason:  reason,
+		Path:    path,
+		StarNum: starNum,
+		GoVal:   goVal,
+	}
+	d.recordErr(err)
+}
+
+func (d *decoder) recordErr(err error) {
 	d.errs = append(d.errs, err)
 	if d.maxErrs > 0 && len(d.errs) >= d.maxErrs {
 		d.errs = append(d.errs, errors.New("maximum number of errors reached"))
