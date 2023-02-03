@@ -240,6 +240,16 @@ func TestFromStarlark(t *testing.T) {
 		{"too big into uintptr", M{"Up": starlark.Float(math.MaxUint64 + 1)}, &StrctNums{}, nil, `Up: cannot assign Starlark float to Go type uintptr: value out of range`},
 		{"too big into float32", M{"f32": starlark.Float(math.MaxFloat64)}, &StrctNums{}, nil, `F32: cannot assign Starlark float to Go type float32: value cannot be exactly represented`},
 		{"too big into float64", M{"f64": starlark.Float(math.MaxFloat64 + 1)}, &StrctNums{}, StrctNums{F64: math.MaxFloat64 + 1}, ``},
+		{"too big for exact float32", M{"f32": starlark.MakeUint(9007199254740993)}, &StrctNums{}, nil, `F32: cannot assign Starlark int to Go type float32: value cannot be exactly represented`},
+		{"too big for exact float64", M{"f64": starlark.MakeUint(9007199254740993)}, &StrctNums{}, nil, `F64: cannot assign Starlark int to Go type float64: value cannot be exactly represented`},
+		{"very big int to float32", M{"f32": starlark.MakeUint(9007199254740992)}, &StrctNums{}, StrctNums{F32: 9007199254740992}, ``},
+		{"very big int to float64", M{"f64": starlark.MakeUint(9007199254740992)}, &StrctNums{}, StrctNums{F64: 9007199254740992}, ``},
+		{"very small int to float32", M{"f32": starlark.MakeInt(-9007199254740992)}, &StrctNums{}, StrctNums{F32: -9007199254740992}, ``},
+		{"very small int to float64", M{"f64": starlark.MakeInt(-9007199254740992)}, &StrctNums{}, StrctNums{F64: -9007199254740992}, ``},
+		{"too small int to float32", M{"f32": starlark.MakeInt(-9007199254740993)}, &StrctNums{}, nil, `F32: cannot assign Starlark int to Go type float32: value cannot be exactly represented`},
+		{"too small int to float64", M{"f64": starlark.MakeInt(-9007199254740993)}, &StrctNums{}, nil, `F64: cannot assign Starlark int to Go type float64: value cannot be exactly represented`},
+		{"too big bigint to float32", M{"f32": starlark.MakeBigInt(tooBig)}, &StrctNums{}, nil, `F32: cannot assign Starlark int to Go type float32: value cannot be exactly represented`},
+		{"too big bigint to float64", M{"f64": starlark.MakeBigInt(tooBig)}, &StrctNums{}, nil, `F64: cannot assign Starlark int to Go type float64: value cannot be exactly represented`},
 
 		{"embedded ptr int", M{"i": starlark.MakeInt(1)}, &StrctDict{}, StrctDict{StrctNums: &StrctNums{I: 1}}, ``},
 		{"embedded ptr *int", M{"iptr": starlark.MakeInt(1)}, &StrctDict{}, StrctDict{StrctNums: &StrctNums{Iptr: iptr(1)}}, ``},
@@ -288,6 +298,15 @@ func TestFromStarlark(t *testing.T) {
 
 		{"target is embedded non-struct", M{"duration": starlark.MakeInt(1)}, &StrctEmbedDuration{}, nil, `Duration: cannot convert Starlark StringDict to Go type time.Duration`},
 		{"target is embedded non-struct pointer", M{"duration": starlark.MakeInt(1)}, &StrctEmbedDurationPtr{}, nil, `Duration: cannot convert Starlark StringDict to Go type *time.Duration`},
+
+		{"multiple errors partial decode",
+			M{"int64": starlark.MakeInt(1), "U8": starlark.MakeInt(-2), "s2ptr": starlark.String("a"), "bools": dict(M{"b": starlark.True})},
+			&StrctDict{},
+			StrctDict{StrctNums: &StrctNums{I64: 1}, StrctBool: StrctBool{B: true}},
+			`StrctNums.U8: cannot assign Starlark int to Go type uint8: value out of range
+StrctStr.S2ptr: cannot convert Starlark string to Go type **string`},
+
+		// TODO: test max errs reached
 	}
 
 	for _, c := range cases {
@@ -296,12 +315,14 @@ func TestFromStarlark(t *testing.T) {
 			if c.err != "" {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), c.err)
-				return
+			} else {
+				require.NoError(t, err)
 			}
 
-			require.NoError(t, err)
-			rv := reflect.ValueOf(c.dst)
-			require.Equal(t, c.want, rv.Elem().Interface())
+			if c.want != nil {
+				rv := reflect.ValueOf(c.dst)
+				require.Equal(t, c.want, rv.Elem().Interface())
+			}
 		})
 	}
 }

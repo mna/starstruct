@@ -263,6 +263,26 @@ func (d *decoder) setFieldInt(path string, fld reflect.Value, i starlark.Int) {
 	switch fld.Kind() {
 	case reflect.Float32, reflect.Float64:
 		f, _ := starlark.AsFloat(i)
+		integer, frac := math.Modf(f)
+		if frac != 0 {
+			d.recordNumberErr(path, i, fld, NumCannotExactlyRepresent)
+			return
+		}
+		if ui, ok := i.Uint64(); ok {
+			if uint64(integer) != ui {
+				d.recordNumberErr(path, i, fld, NumCannotExactlyRepresent)
+				return
+			}
+		} else if si, ok := i.Int64(); ok {
+			if int64(integer) != si {
+				d.recordNumberErr(path, i, fld, NumCannotExactlyRepresent)
+				return
+			}
+		} else {
+			// must be a big int, cannot be exactly represented
+			d.recordNumberErr(path, i, fld, NumCannotExactlyRepresent)
+			return
+		}
 		fld.SetFloat(f)
 	default:
 		if err := starlark.AsInt(i, fld.Addr().Interface()); err != nil {
