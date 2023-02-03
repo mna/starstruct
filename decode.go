@@ -1,6 +1,7 @@
 package starstruct
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -69,26 +70,35 @@ func FromStarlark(vals starlark.StringDict, dst any) error {
 	}
 
 	var d decoder
-	_, err := d.walkStructDecode("", rval, stringDictValue{vals})
-	return err
+	return d.decode(rval, vals)
 }
 
 type decoder struct {
 	errs    []error
+	maxErrs int
 	decoded map[dictGetSetter]map[string]bool
 	restDst map[dictGetSetter]reflect.Value
+}
+
+func (d *decoder) decode(strct reflect.Value, sdict starlark.StringDict) (err error) {
+	defer func() {
+		if e := recover(); e != nil {
+			if _, ok := e.(tooManyErrs); ok {
+				err = errors.Join(d.errs...)
+			}
+		}
+	}()
+
+	d.walkStructDecode("", strct, stringDictValue{sdict})
+	err = errors.Join(d.errs...)
+	return
 }
 
 // TODO: maybe add support for a "rest" map[string]starlark.Value for
 // dictionary values that were not decoded to fields?
 // TODO: add support for custom decoders, via a func(path, starVal, dstVal) (bool, error)?
 
-// nolint: unused
-type ignore struct{ x starlark.Value }
-
-var starlarkValueType = reflect.TypeOf(ignore{}).Field(0).Type
-
-func (d *decoder) walkStructDecode(path string, strct reflect.Value, vals dictGetSetter) (didSet bool, err error) {
+func (d *decoder) walkStructDecode(path string, strct reflect.Value, vals dictGetSetter) (didSet bool) {
 	strctTyp := strct.Type()
 	count := strctTyp.NumField()
 	for i := 0; i < count; i++ {
@@ -147,7 +157,7 @@ func (d *decoder) walkStructDecode(path string, strct reflect.Value, vals dictGe
 	return didSet, nil
 }
 
-func (d *decoder) fromStarlarkValue(path string, starVal starlark.Value, dst reflect.Value) error {
+func (d *decoder) fromStarlarkValue(path string, starVal starlark.Value, dst reflect.Value) {
 	// if destination is starlark.Value interface (or a pointer to it), assign
 	// it directly, as-is.
 	if t := dst.Type(); isTOrPtrTType(t, starlarkValueType) {
@@ -169,12 +179,12 @@ func (d *decoder) fromStarlarkValue(path string, starVal starlark.Value, dst ref
 		}
 
 	case starlark.Bytes:
-		if err := d.setFieldBytes(path, dst, string(v)); err != nil {
+		if err := d.setFieldBytes(path, dst, v); err != nil {
 			return err
 		}
 
 	case starlark.String:
-		if err := d.setFieldString(path, dst, string(v)); err != nil {
+		if err := d.setFieldString(path, dst, v); err != nil {
 			return err
 		}
 
@@ -552,15 +562,15 @@ func (d *decoder) setFieldSet(path string, fld reflect.Value, set *starlark.Set)
 	return nil
 }
 
-func (d *decoder) setFieldBytes(path string, fld reflect.Value, s string) error {
-	return d.setFieldBytesOrString(path, "Bytes", fld, s)
+func (d *decoder) setFieldBytes(path string, fld reflect.Value, s starlark.Bytes) {
+	d.setFieldBytesOrString(path, fld, s, string(s))
 }
 
-func (d *decoder) setFieldString(path string, fld reflect.Value, s string) error {
-	return d.setFieldBytesOrString(path, "String", fld, s)
+func (d *decoder) setFieldString(path string, fld reflect.Value, s starlark.String) {
+	d.setFieldBytesOrString(path, fld, s, string(s))
 }
 
-func (d *decoder) setFieldBytesOrString(path, label string, fld reflect.Value, s string) error {
+func (d *decoder) setFieldBytesOrString(path string, fld reflect.Value, v starlark.Value, s string) {
 	byteSlice := isByteSliceType(fld.Type())
 
 	// support a single-level of indirection, in case the value may be None
@@ -568,7 +578,8 @@ func (d *decoder) setFieldBytesOrString(path, label string, fld reflect.Value, s
 		ptrToTyp := fld.Type().Elem()
 		byteSlice = isByteSliceType(ptrToTyp)
 		if ptrToTyp.Kind() != reflect.String && !byteSlice {
-			return fmt.Errorf("cannot assign %s to unsupported field type at %s: %s", label, path, fld.Type())
+			d.recordErr(path, v, fld)
+			return
 		}
 
 		if fld.IsNil() {
@@ -579,15 +590,39 @@ func (d *decoder) setFieldBytesOrString(path, label string, fld reflect.Value, s
 	}
 
 	if fld.Kind() != reflect.String && !byteSlice {
-		return fmt.Errorf("cannot assign %s to unsupported field type at %s: %s", label, path, fld.Type())
+		d.recordErr(path, v, fld)
+		return
 	}
 	if byteSlice {
 		fld.SetBytes([]byte(s))
-		return nil
+	} else {
+		fld.SetString(s)
 	}
-	fld.SetString(s)
-	return nil
 }
+
+// sentinel type for the panic raised when the maximum number of errors is
+// reached.
+type tooManyErrs struct{}
+
+func (d *decoder) recordErr(path string, starVal starlark.Value, goVal reflect.Value) {
+	err := &Error{
+		Op:      OpFromStarlark,
+		Path:    path,
+		StarVal: starVal,
+		GoVal:   goVal,
+	}
+
+	d.errs = append(d.errs, err)
+	if d.maxErrs > 0 && len(d.errs) >= d.maxErrs {
+		d.errs = append(d.errs, errors.New("maximum number of errors reached"))
+		panic(tooManyErrs{})
+	}
+}
+
+// nolint: unused
+type ignore struct{ x starlark.Value }
+
+var starlarkValueType = reflect.TypeOf(ignore{}).Field(0).Type
 
 func isByteSliceType(t reflect.Type) bool {
 	if t.Kind() != reflect.Slice {

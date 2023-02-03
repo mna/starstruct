@@ -13,6 +13,8 @@ The [code documentation](https://pkg.go.dev/github.com/mna/starstruct) is the ca
 
 ## Installation
 
+Note that `starstruct` requires Go 1.20+.
+
 ```
 $ go get github.com/mna/starstruct
 ```
