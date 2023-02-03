@@ -67,8 +67,16 @@ func FromStarlark(vals starlark.StringDict, dst any) error {
 	if !rval.CanAddr() || !rval.CanSet() {
 		panic(fmt.Sprintf("destination value is a pointer to an unaddressable or unsettable struct: %s", oriVal.Type()))
 	}
-	_, err := walkStructDecode("", rval, stringDictValue{vals})
+
+	var d decoder
+	_, err := d.walkStructDecode("", rval, stringDictValue{vals})
 	return err
+}
+
+type decoder struct {
+	errs    []error
+	decoded map[dictGetSetter]map[string]bool
+	restDst map[dictGetSetter]reflect.Value
 }
 
 // TODO: maybe add support for a "rest" map[string]starlark.Value for
@@ -80,7 +88,7 @@ type ignore struct{ x starlark.Value }
 
 var starlarkValueType = reflect.TypeOf(ignore{}).Field(0).Type
 
-func walkStructDecode(path string, strct reflect.Value, vals dictGetSetter) (didSet bool, err error) {
+func (d *decoder) walkStructDecode(path string, strct reflect.Value, vals dictGetSetter) (didSet bool, err error) {
 	strctTyp := strct.Type()
 	count := strctTyp.NumField()
 	for i := 0; i < count; i++ {
@@ -105,7 +113,7 @@ func walkStructDecode(path string, strct reflect.Value, vals dictGetSetter) (did
 		// struct with the current vals.
 		if nm == "" {
 			if fldTyp.Anonymous {
-				ok, err := setFieldDict(path, fld, vals)
+				ok, err := d.setFieldDict(path, fld, vals)
 				if err != nil {
 					return didSet, err
 				}
@@ -132,18 +140,18 @@ func walkStructDecode(path string, strct reflect.Value, vals dictGetSetter) (did
 		// at this point, the struct field has a matching starlark value, so it
 		// will either set it or return an error.
 		didSet = true
-		if err := fromStarlarkValue(path, matchingVal, fld); err != nil {
+		if err := d.fromStarlarkValue(path, matchingVal, fld); err != nil {
 			return didSet, err
 		}
 	}
 	return didSet, nil
 }
 
-func fromStarlarkValue(path string, starVal starlark.Value, dst reflect.Value) error {
+func (d *decoder) fromStarlarkValue(path string, starVal starlark.Value, dst reflect.Value) error {
 	// if destination is starlark.Value interface (or a pointer to it), assign
 	// it directly, as-is.
 	if t := dst.Type(); isTOrPtrTType(t, starlarkValueType) {
-		if err := setFieldStarlark(path, dst, starVal); err != nil {
+		if err := d.setFieldStarlark(path, dst, starVal); err != nil {
 			return err
 		}
 		return nil
@@ -151,52 +159,52 @@ func fromStarlarkValue(path string, starVal starlark.Value, dst reflect.Value) e
 
 	switch v := starVal.(type) {
 	case starlark.NoneType:
-		if err := setFieldNone(path, dst); err != nil {
+		if err := d.setFieldNone(path, dst); err != nil {
 			return err
 		}
 
 	case starlark.Bool:
-		if err := setFieldBool(path, dst, bool(v)); err != nil {
+		if err := d.setFieldBool(path, dst, bool(v)); err != nil {
 			return err
 		}
 
 	case starlark.Bytes:
-		if err := setFieldBytes(path, dst, string(v)); err != nil {
+		if err := d.setFieldBytes(path, dst, string(v)); err != nil {
 			return err
 		}
 
 	case starlark.String:
-		if err := setFieldString(path, dst, string(v)); err != nil {
+		if err := d.setFieldString(path, dst, string(v)); err != nil {
 			return err
 		}
 
 	case starlark.Int:
-		if err := setFieldInt(path, dst, v); err != nil {
+		if err := d.setFieldInt(path, dst, v); err != nil {
 			return err
 		}
 
 	case starlark.Float:
-		if err := setFieldFloat(path, dst, v); err != nil {
+		if err := d.setFieldFloat(path, dst, v); err != nil {
 			return err
 		}
 
 	case *starlark.Dict:
-		if _, err := setFieldDict(path, dst, v); err != nil {
+		if _, err := d.setFieldDict(path, dst, v); err != nil {
 			return err
 		}
 
 	case *starlark.List:
-		if err := setFieldList(path, dst, v); err != nil {
+		if err := d.setFieldList(path, dst, v); err != nil {
 			return err
 		}
 
 	case starlark.Tuple:
-		if err := setFieldTuple(path, dst, v); err != nil {
+		if err := d.setFieldTuple(path, dst, v); err != nil {
 			return err
 		}
 
 	case *starlark.Set:
-		if err := setFieldSet(path, dst, v); err != nil {
+		if err := d.setFieldSet(path, dst, v); err != nil {
 			return err
 		}
 
@@ -209,7 +217,7 @@ func fromStarlarkValue(path string, starVal starlark.Value, dst reflect.Value) e
 	return nil
 }
 
-func setFieldNone(path string, fld reflect.Value) error {
+func (d *decoder) setFieldNone(path string, fld reflect.Value) error {
 	if fld.Kind() != reflect.Pointer && fld.Kind() != reflect.Slice && fld.Kind() != reflect.Map {
 		return fmt.Errorf("cannot assign None to unsupported field type at %s: %s", path, fld.Type())
 	}
@@ -217,7 +225,7 @@ func setFieldNone(path string, fld reflect.Value) error {
 	return nil
 }
 
-func setFieldStarlark(path string, fld reflect.Value, v starlark.Value) error {
+func (d *decoder) setFieldStarlark(path string, fld reflect.Value, v starlark.Value) error {
 	// support a single-level of indirection for consistency with other types
 	if fld.Kind() == reflect.Pointer {
 		ptrToTyp := fld.Type().Elem()
@@ -239,7 +247,7 @@ func setFieldStarlark(path string, fld reflect.Value, v starlark.Value) error {
 	return nil
 }
 
-func setFieldBool(path string, fld reflect.Value, b bool) error {
+func (d *decoder) setFieldBool(path string, fld reflect.Value, b bool) error {
 	// support a single-level of indirection, in case the value may be None
 	if fld.Kind() == reflect.Pointer {
 		ptrToTyp := fld.Type().Elem()
@@ -261,7 +269,7 @@ func setFieldBool(path string, fld reflect.Value, b bool) error {
 	return nil
 }
 
-func setFieldInt(path string, fld reflect.Value, i starlark.Int) error {
+func (d *decoder) setFieldInt(path string, fld reflect.Value, i starlark.Int) error {
 	// support a single-level of indirection, in case the value may be None
 	if fld.Kind() == reflect.Pointer {
 		ptrToTyp := fld.Type().Elem()
@@ -294,7 +302,7 @@ func setFieldInt(path string, fld reflect.Value, i starlark.Int) error {
 
 var epsilon = float64(math.Nextafter32(1, 2) - 1)
 
-func setFieldFloat(path string, fld reflect.Value, f starlark.Float) error {
+func (d *decoder) setFieldFloat(path string, fld reflect.Value, f starlark.Float) error {
 	// support a single-level of indirection, in case the value may be None
 	if fld.Kind() == reflect.Pointer {
 		ptrToTyp := fld.Type().Elem()
@@ -391,7 +399,7 @@ func setFieldFloat(path string, fld reflect.Value, f starlark.Float) error {
 	return nil
 }
 
-func setFieldDict(path string, fld reflect.Value, dict dictGetSetter) (didSet bool, err error) {
+func (d *decoder) setFieldDict(path string, fld reflect.Value, dict dictGetSetter) (didSet bool, err error) {
 	var ptrToStrct reflect.Value
 
 	// support a single-level of indirection, in case the value may be None
@@ -414,19 +422,19 @@ func setFieldDict(path string, fld reflect.Value, dict dictGetSetter) (didSet bo
 	if fld.Kind() != reflect.Struct {
 		return didSet, fmt.Errorf("cannot assign Dict to unsupported field type at %s: %s", path, fld.Type())
 	}
-	didSet, err = walkStructDecode(path, fld, dict)
+	didSet, err = d.walkStructDecode(path, fld, dict)
 	if didSet && ptrToStrct.Kind() == reflect.Pointer {
 		ptrToStrct.Set(fld.Addr())
 	}
 	return didSet, err
 }
 
-func setFieldList(path string, fld reflect.Value, list *starlark.List) error {
-	return setFieldIterator(path, "List", fld, list)
+func (d *decoder) setFieldList(path string, fld reflect.Value, list *starlark.List) error {
+	return d.setFieldIterator(path, "List", fld, list)
 }
 
-func setFieldTuple(path string, fld reflect.Value, tup starlark.Tuple) error {
-	return setFieldIterator(path, "Tuple", fld, tup)
+func (d *decoder) setFieldTuple(path string, fld reflect.Value, tup starlark.Tuple) error {
+	return d.setFieldIterator(path, "Tuple", fld, tup)
 }
 
 type iterable interface {
@@ -434,7 +442,7 @@ type iterable interface {
 	Len() int
 }
 
-func setFieldIterator(path, label string, fld reflect.Value, iter iterable) error {
+func (d *decoder) setFieldIterator(path, label string, fld reflect.Value, iter iterable) error {
 	// support a single-level of indirection, in case the value may be None (even
 	// though it wouldn't be necessary as slice can be nil, but for consistency
 	// with other types)
@@ -480,7 +488,7 @@ func setFieldIterator(path, label string, fld reflect.Value, iter iterable) erro
 	var i int
 	for it.Next(&newVal) {
 		newElem := reflect.New(elemTyp).Elem()
-		if err := fromStarlarkValue(fmt.Sprintf("%s[%d]", path, i), newVal, newElem); err != nil {
+		if err := d.fromStarlarkValue(fmt.Sprintf("%s[%d]", path, i), newVal, newElem); err != nil {
 			return err
 		}
 		fld.Set(reflect.Append(fld, newElem))
@@ -491,10 +499,10 @@ func setFieldIterator(path, label string, fld reflect.Value, iter iterable) erro
 
 var trueValue = reflect.ValueOf(true)
 
-func setFieldSet(path string, fld reflect.Value, set *starlark.Set) error {
+func (d *decoder) setFieldSet(path string, fld reflect.Value, set *starlark.Set) error {
 	if fldTyp := fld.Type(); fldTyp.Kind() == reflect.Slice || fldTyp.Kind() == reflect.Pointer && fldTyp.Elem().Kind() == reflect.Slice {
 		// same as decoding a List/Tuple
-		return setFieldIterator(path, "Set", fld, set)
+		return d.setFieldIterator(path, "Set", fld, set)
 	}
 
 	// support a single-level of indirection, in case the value may be None (even
@@ -535,7 +543,7 @@ func setFieldSet(path string, fld reflect.Value, set *starlark.Set) error {
 	var i int
 	for it.Next(&newVal) {
 		newKey := reflect.New(keyTyp).Elem()
-		if err := fromStarlarkValue(fmt.Sprintf("%s[%d]", path, i), newVal, newKey); err != nil {
+		if err := d.fromStarlarkValue(fmt.Sprintf("%s[%d]", path, i), newVal, newKey); err != nil {
 			return err
 		}
 		fld.SetMapIndex(newKey, trueValue)
@@ -544,15 +552,15 @@ func setFieldSet(path string, fld reflect.Value, set *starlark.Set) error {
 	return nil
 }
 
-func setFieldBytes(path string, fld reflect.Value, s string) error {
-	return setFieldBytesOrString(path, "Bytes", fld, s)
+func (d *decoder) setFieldBytes(path string, fld reflect.Value, s string) error {
+	return d.setFieldBytesOrString(path, "Bytes", fld, s)
 }
 
-func setFieldString(path string, fld reflect.Value, s string) error {
-	return setFieldBytesOrString(path, "String", fld, s)
+func (d *decoder) setFieldString(path string, fld reflect.Value, s string) error {
+	return d.setFieldBytesOrString(path, "String", fld, s)
 }
 
-func setFieldBytesOrString(path, label string, fld reflect.Value, s string) error {
+func (d *decoder) setFieldBytesOrString(path, label string, fld reflect.Value, s string) error {
 	byteSlice := isByteSliceType(fld.Type())
 
 	// support a single-level of indirection, in case the value may be None
