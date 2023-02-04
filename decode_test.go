@@ -81,10 +81,12 @@ func TestFromStarlark(t *testing.T) {
 	}
 
 	type StrctStarval struct {
-		Star     starlark.Value
-		StarPtr  *starlark.Value
-		Star2Ptr **starlark.Value
-		NotStar  dummyValue
+		Star            starlark.Value
+		StarPtr         *starlark.Value
+		Star2Ptr        **starlark.Value
+		NotStar         dummyValue
+		ExpandedStar    starlark.Callable
+		ExpandedStarPtr *starlark.Callable
 	}
 
 	cases := []struct {
@@ -295,6 +297,8 @@ func TestFromStarlark(t *testing.T) {
 		{"decode into starlark **Value", M{"star2ptr": starlark.MakeInt(1)}, &StrctStarval{}, nil, `Star2Ptr: cannot convert Starlark int to Go type **starlark.Value`},
 		{"decode into wrapped starlark value interface", M{"notstar": starlark.MakeInt(1)}, &StrctStarval{}, nil, `NotStar: cannot convert Starlark int to Go type starstruct.dummyValue`},
 		{"decode into embedded starlark value", M{"anything": starlark.MakeInt(1)}, &dummyValue{}, nil, `Value: cannot convert Starlark StringDict to Go type starlark.Value`},
+		{"decode into expanded starlark value interface", M{"expandedstar": starlark.MakeInt(1)}, &StrctStarval{}, nil, `ExpandedStar: cannot convert Starlark int to Go type starlark.Callable`},
+		{"decode into expanded pointer to starlark value interface", M{"expandedstarptr": starlark.MakeInt(1)}, &StrctStarval{}, nil, `ExpandedStarPtr: cannot convert Starlark int to Go type *starlark.Callable`},
 
 		{"target is embedded non-struct", M{"duration": starlark.MakeInt(1)}, &StrctEmbedDuration{}, nil, `Duration: cannot convert Starlark StringDict to Go type time.Duration`},
 		{"target is embedded non-struct pointer", M{"duration": starlark.MakeInt(1)}, &StrctEmbedDurationPtr{}, nil, `Duration: cannot convert Starlark StringDict to Go type *time.Duration`},
@@ -305,8 +309,6 @@ func TestFromStarlark(t *testing.T) {
 			StrctDict{StrctNums: &StrctNums{I64: 1}, StrctBool: StrctBool{B: true}},
 			`StrctNums.U8: cannot assign Starlark int to Go type uint8: value out of range
 StrctStr.S2ptr: cannot convert Starlark string to Go type **string`},
-
-		// TODO: test max errs reached
 	}
 
 	for _, c := range cases {
@@ -327,7 +329,7 @@ StrctStr.S2ptr: cannot convert Starlark string to Go type **string`},
 	}
 }
 
-func TestFromStarlarkInvalidDestination(t *testing.T) {
+func TestFromStarlark_InvalidDestination(t *testing.T) {
 	var s string
 
 	require.PanicsWithValue(t, `destination value is not a pointer to a struct: string`, func() {
@@ -344,4 +346,33 @@ func TestFromStarlarkInvalidDestination(t *testing.T) {
 	require.PanicsWithValue(t, `destination value is a nil pointer: *starstruct.T`, func() {
 		_ = FromStarlark(nil, (*T)(nil))
 	})
+}
+
+func TestFromStarlark_MaxErrs(t *testing.T) {
+	type S struct {
+		I  int
+		S  string
+		B  **bool
+		Ch chan byte
+	}
+
+	var s S
+	err := FromStarlark(M{
+		"I":  starlark.MakeInt(1),
+		"B":  starlark.True,
+		"Ch": starlark.String("a"),
+		"S":  starlark.MakeInt(32),
+	}, &s, MaxErrors(2))
+
+	require.Error(t, err)
+	errs := err.(interface{ Unwrap() []error }).Unwrap()
+	require.Len(t, errs, 3)
+
+	var te *TypeError
+	require.ErrorAs(t, errs[0], &te)
+	require.Contains(t, errs[0].Error(), `S: cannot convert Starlark int to Go type string`)
+	require.ErrorAs(t, errs[1], &te)
+	require.Contains(t, errs[1].Error(), `B: cannot convert Starlark bool to Go type **bool`)
+	require.ErrorAs(t, errs[1], &te)
+	require.Contains(t, errs[2].Error(), `maximum number of errors reached`)
 }

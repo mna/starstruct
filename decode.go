@@ -10,6 +10,20 @@ import (
 	"go.starlark.net/starlark"
 )
 
+// FromOption is the type of the decoding options that can be provided to the
+// FromStarlark function.
+type FromOption func(*decoder)
+
+// MaxErrors sets the maximum numbers of errors to return. If too many errors
+// are reached, the error returned by FromStarlark will wrap max + 1 errors,
+// the last one being an error indicating that the maximum was reached. If max
+// <= 0, all errors will be returned.
+func MaxErrors(max int) FromOption {
+	return func(d *decoder) {
+		d.maxErrs = max
+	}
+}
+
 // FromStarlark loads the starlark values from vals into a destination Go
 // struct. It supports the following data types from Starlark to Go, and all Go
 // types can also be a pointer to that type:
@@ -50,7 +64,7 @@ import (
 //   - If the embedded field has a starlark name specified in its struct tag
 //     (and that name is not "-"), the starlark dictionary corresponding to that
 //     name is decoded to that embedded struct.
-func FromStarlark(vals starlark.StringDict, dst any) error {
+func FromStarlark(vals starlark.StringDict, dst any, opts ...FromOption) error {
 	if dst == nil {
 		panic("destination value is not a pointer to a struct: nil")
 	}
@@ -70,14 +84,17 @@ func FromStarlark(vals starlark.StringDict, dst any) error {
 	}
 
 	var d decoder
+	for _, opt := range opts {
+		opt(&d)
+	}
 	return d.decode(rval, vals)
 }
 
 type decoder struct {
 	errs    []error
 	maxErrs int
-	decoded map[dictGetSetter]map[string]bool
-	restDst map[dictGetSetter]reflect.Value
+	//decoded map[dictGetSetter]map[string]bool
+	//restDst map[dictGetSetter]reflect.Value
 }
 
 func (d *decoder) decode(strct reflect.Value, sdict starlark.StringDict) (err error) {
@@ -198,6 +215,7 @@ func (d *decoder) setFieldStarlark(path string, fld reflect.Value, v starlark.Va
 	if fld.Kind() == reflect.Pointer {
 		ptrToTyp := fld.Type().Elem()
 		if ptrToTyp != starlarkValueType {
+			// cannot happen as setFieldStarlark is called only if fld is [*]starlark.Value
 			d.recordTypeErr(path, v, fld)
 			return
 		}
@@ -210,6 +228,7 @@ func (d *decoder) setFieldStarlark(path string, fld reflect.Value, v starlark.Va
 	}
 
 	if fld.Type() != starlarkValueType {
+		// cannot happen as setFieldStarlark is called only if fld is [*]starlark.Value
 		d.recordTypeErr(path, v, fld)
 		return
 	}
@@ -265,6 +284,7 @@ func (d *decoder) setFieldInt(path string, fld reflect.Value, i starlark.Int) {
 		f, _ := starlark.AsFloat(i)
 		integer, frac := math.Modf(f)
 		if frac != 0 {
+			// this cannot happen
 			d.recordNumberErr(path, i, fld, NumCannotExactlyRepresent)
 			return
 		}
