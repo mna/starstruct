@@ -400,3 +400,14 @@ func TestFromStarlark_MaxFromErrors(t *testing.T) {
 		require.Contains(t, errs[2].Error(), `Ch: cannot convert Starlark string to Go type chan uint8`)
 	})
 }
+
+func TestFromStarlark_DuplicateTarget(t *testing.T) {
+	type S struct {
+		I   int `starlark:"int"`
+		Int *int
+	}
+	var s S
+	err := FromStarlark(M{"int": starlark.MakeInt(123)}, &s)
+	require.NoError(t, err)
+	require.Equal(t, S{I: 123, Int: iptr(123)}, s)
+}

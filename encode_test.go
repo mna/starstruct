@@ -243,3 +243,14 @@ func TestToStarlark_MaxToErrors(t *testing.T) {
 		require.Contains(t, errs[2].Error(), `Ch: unsupported Go type chan uint8`)
 	})
 }
+
+func TestToStarlark_DuplicateDest(t *testing.T) {
+	type S struct {
+		I   int  `starlark:"int"`
+		Int *int `starlark:"int"`
+	}
+	m := M{}
+	err := ToStarlark(S{I: 123, Int: iptr(456)}, m)
+	require.NoError(t, err)
+	require.Equal(t, M{"int": starlark.MakeInt(456)}, m)
+}
