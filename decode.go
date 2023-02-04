@@ -14,11 +14,11 @@ import (
 // FromStarlark function.
 type FromOption func(*decoder)
 
-// MaxErrors sets the maximum numbers of errors to return. If too many errors
-// are reached, the error returned by FromStarlark will wrap max + 1 errors,
-// the last one being an error indicating that the maximum was reached. If max
-// <= 0, all errors will be returned.
-func MaxErrors(max int) FromOption {
+// MaxFromErrors sets the maximum numbers of errors to return. If too many
+// errors are reached, the error returned by FromStarlark will wrap max + 1
+// errors, the last one being an error indicating that the maximum was reached.
+// If max <= 0, all errors will be returned.
+func MaxFromErrors(max int) FromOption {
 	return func(d *decoder) {
 		d.maxErrs = max
 	}
@@ -102,6 +102,8 @@ func (d *decoder) decode(strct reflect.Value, sdict starlark.StringDict) (err er
 		if e := recover(); e != nil {
 			if _, ok := e.(tooManyErrs); ok {
 				err = errors.Join(d.errs...)
+			} else {
+				panic(e)
 			}
 		}
 	}()
@@ -140,7 +142,7 @@ func (d *decoder) walkStructDecode(path string, strct reflect.Value, vals dictGe
 		// struct with the current vals.
 		if nm == "" {
 			if fldTyp.Anonymous {
-				if ok := d.setFieldDict(path, fld, vals); ok {
+				if ok := d.setFieldDict(path, fld, true, vals); ok {
 					didSet = true
 				}
 				continue
@@ -190,7 +192,7 @@ func (d *decoder) fromStarlarkValue(path string, starVal starlark.Value, dst ref
 	case starlark.Float:
 		d.setFieldFloat(path, dst, v)
 	case *starlark.Dict:
-		d.setFieldDict(path, dst, v)
+		d.setFieldDict(path, dst, false, v)
 	case *starlark.List:
 		d.setFieldList(path, dst, v)
 	case starlark.Tuple:
@@ -426,7 +428,7 @@ func (d *decoder) setFieldFloat(path string, fld reflect.Value, f starlark.Float
 	}
 }
 
-func (d *decoder) setFieldDict(path string, fld reflect.Value, dict dictGetSetter) (didSet bool) {
+func (d *decoder) setFieldDict(path string, fld reflect.Value, embedded bool, dict dictGetSetter) (didSet bool) {
 	var ptrToStrct reflect.Value
 
 	// support a single-level of indirection, in case the value may be None
@@ -435,7 +437,11 @@ func (d *decoder) setFieldDict(path string, fld reflect.Value, dict dictGetSette
 		ptrToTyp := fld.Type().Elem()
 		// must be a struct
 		if ptrToTyp.Kind() != reflect.Struct {
-			d.recordTypeErr(path, dict, fld)
+			if embedded {
+				d.recordEmbeddedTypeErr(path, dict, fld)
+			} else {
+				d.recordTypeErr(path, dict, fld)
+			}
 			return didSet
 		}
 
@@ -448,7 +454,11 @@ func (d *decoder) setFieldDict(path string, fld reflect.Value, dict dictGetSette
 	}
 
 	if fld.Kind() != reflect.Struct {
-		d.recordTypeErr(path, dict, fld)
+		if embedded {
+			d.recordEmbeddedTypeErr(path, dict, fld)
+		} else {
+			d.recordTypeErr(path, dict, fld)
+		}
 		return didSet
 	}
 	didSet = d.walkStructDecode(path, fld, dict)
@@ -629,6 +639,17 @@ func (d *decoder) recordTypeErr(path string, starVal starlark.Value, goVal refle
 		Path:    path,
 		StarVal: starVal,
 		GoVal:   goVal,
+	}
+	d.recordErr(err)
+}
+
+func (d *decoder) recordEmbeddedTypeErr(path string, starVal starlark.Value, goVal reflect.Value) {
+	err := &TypeError{
+		Op:       OpFromStarlark,
+		Path:     path,
+		StarVal:  starVal,
+		GoVal:    goVal,
+		Embedded: true,
 	}
 	d.recordErr(err)
 }

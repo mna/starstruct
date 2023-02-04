@@ -23,10 +23,16 @@ const (
 // function, and the errors wrapped in that call may contain
 // starstruct.TypeError errors.
 type TypeError struct {
-	Op      ConvOp
-	Path    string
+	// Op indicates if this is in a FromStarlark or ToStarlark call.
+	Op ConvOp
+	// Path indicates the Go struct path to the field in error.
+	Path string
+	// StarVal is the starlark value in a From conversion, nil otherwise.
 	StarVal starlark.Value
-	GoVal   reflect.Value
+	// GoVal is the Go value associated with the error.
+	GoVal reflect.Value
+	// Embedded is true if the Go value is an embedded struct field.
+	Embedded bool
 }
 
 // Error returns the error message of the starstruct error.
@@ -36,6 +42,9 @@ func (e *TypeError) Error() string {
 			return fmt.Sprintf("%s: cannot convert nil Starlark value to Go type %s", e.Path, e.GoVal.Type())
 		}
 		return fmt.Sprintf("%s: cannot convert Starlark %s to Go type %s", e.Path, e.StarVal.Type(), e.GoVal.Type())
+	}
+	if e.Embedded {
+		return fmt.Sprintf("%s: unsupported embedded Go type %s", e.Path, e.GoVal.Type())
 	}
 	return fmt.Sprintf("%s: unsupported Go type %s", e.Path, e.GoVal.Type())
 }
@@ -76,4 +85,24 @@ func (e *NumberError) Error() string {
 		return fmt.Sprintf("%s: cannot assign Starlark %s to Go type %s: value cannot be exactly represented", e.Path, e.StarNum.Type(), e.GoVal.Type())
 	}
 	return fmt.Sprintf("%s: cannot assign Starlark %s to Go type %s: value out of range", e.Path, e.StarNum.Type(), e.GoVal.Type())
+}
+
+type StarlarkContainerError struct {
+	Path      string
+	Container starlark.Value // Set, Dict, StringDict
+	Key       starlark.Value // String, only for Dict/StringDict
+	Value     starlark.Value // inserted value
+	GoVal     reflect.Value
+	Err       error
+}
+
+func (e *StarlarkContainerError) Unwrap() error {
+	return e.Err
+}
+
+func (e *StarlarkContainerError) Error() string {
+	if e.Key == nil {
+		return fmt.Sprintf("%s: failed to insert Starlark %s into %s: %v", e.Path, e.Value.Type(), e.Container.Type(), e.Err)
+	}
+	return fmt.Sprintf("%s: failed to insert Starlark %s at key %s into %s: %v", e.Path, e.Value.Type(), e.Key.String(), e.Container.Type(), e.Err)
 }

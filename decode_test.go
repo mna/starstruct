@@ -348,7 +348,7 @@ func TestFromStarlark_InvalidDestination(t *testing.T) {
 	})
 }
 
-func TestFromStarlark_MaxErrs(t *testing.T) {
+func TestFromStarlark_MaxFromErrors(t *testing.T) {
 	type S struct {
 		I  int
 		S  string
@@ -362,7 +362,7 @@ func TestFromStarlark_MaxErrs(t *testing.T) {
 		"B":  starlark.True,
 		"Ch": starlark.String("a"),
 		"S":  starlark.MakeInt(32),
-	}, &s, MaxErrors(2))
+	}, &s, MaxFromErrors(2))
 
 	require.Error(t, err)
 	errs := err.(interface{ Unwrap() []error }).Unwrap()

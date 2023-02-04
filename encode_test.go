@@ -34,14 +34,14 @@ func TestToStarlark(t *testing.T) {
 		{"nil in empty dst", struct{ Bptr *bool }{}, M{}, M{"Bptr": starlark.None}, ""},
 		{"nil in non-empty dst", struct{ Bptr *bool }{}, M{"A": starlark.String("a")}, M{"A": starlark.String("a"), "Bptr": starlark.None}, ""},
 		{"nil overrides dst", struct{ Bptr *bool }{}, M{"Bptr": starlark.String("a")}, M{"Bptr": starlark.None}, ""},
-		{"nil as **bool", struct{ B **bool }{}, M{}, nil, `unsupported Go type **bool at B`},
+		{"nil as **bool", struct{ B **bool }{}, M{}, nil, `B: unsupported Go type **bool`},
 
 		{"true as bool", struct{ B bool }{B: true}, M{}, M{"B": starlark.Bool(true)}, ""},
 		{"true/false as bool/*bool", struct {
 			B  bool
 			B2 *bool
 		}{B: true, B2: &falsev}, M{}, M{"B": starlark.Bool(true), "B2": starlark.Bool(false)}, ""},
-		{"Bool as **bool", struct{ B **bool }{}, M{}, nil, `unsupported Go type **bool at B`},
+		{"Bool as **bool", struct{ B **bool }{}, M{}, nil, `B: unsupported Go type **bool`},
 
 		{"Int as int", struct{ I int }{I: 1}, M{}, M{"I": starlark.MakeInt(1)}, ``},
 		{"Int as int8", struct{ I int8 }{I: 1}, M{}, M{"I": starlark.MakeInt(1)}, ``},
@@ -117,13 +117,13 @@ func TestToStarlark(t *testing.T) {
 		{"nil *map", struct{ Mptr *map[string]bool }{}, M{}, M{"Mptr": starlark.None}, ``},
 
 		{"time.Duration encodes as in64", struct{ Ts time.Duration }{Ts: time.Second}, M{}, M{"Ts": starlark.MakeInt(int(time.Second))}, ``},
-		{"chan unsupported", struct{ Ch chan int }{Ch: make(chan int)}, M{}, nil, `unsupported Go type chan int at Ch`},
+		{"chan unsupported", struct{ Ch chan int }{Ch: make(chan int)}, M{}, nil, `Ch: unsupported Go type chan int`},
 		{"chan unsupported ignored", struct {
 			Ch chan int `starlark:"-"`
 		}{Ch: make(chan int)}, M{}, M{}, ``},
 		{"slice of funcs as tuples as sets", struct {
 			Fs [][]func() `starlark:"fs,astuple,asset"`
-		}{Fs: [][]func(){{func() {}}}}, M{}, nil, `unsupported Go type func() at Fs[0][0]`},
+		}{Fs: [][]func(){{func() {}}}}, M{}, nil, `Fs[0][0]: unsupported Go type func()`},
 		{"slice of strings as tuple as set", struct {
 			Ss [][]string `starlark:"ss,astuple,asset"`
 		}{Ss: [][]string{{"a"}}}, M{}, M{"ss": tup(set(starlark.String("a")))}, ``},
@@ -132,35 +132,35 @@ func TestToStarlark(t *testing.T) {
 		}{Sss: [][][]string{{{"a"}}}}, M{}, M{"sss": list(set(tup(starlark.String("a"))))}, ``},
 		{"invalid slice type for as set", struct {
 			Strct []struct{} `starlark:"strct,asset"`
-		}{Strct: []struct{}{{}}}, M{}, nil, `failed to insert value into Set at Strct: unhashable type: dict`},
+		}{Strct: []struct{}{{}}}, M{}, nil, `Strct[0]: failed to insert Starlark dict into set: unhashable type: dict`},
 		{"invalid map key type for set", struct {
 			M map[struct{}]bool
-		}{M: map[struct{}]bool{{}: true}}, M{}, nil, `failed to insert value into Set at M: unhashable type: dict`},
+		}{M: map[struct{}]bool{{}: true}}, M{}, nil, `M[{}]: failed to insert Starlark dict into set: unhashable type: dict`},
 		{"unsupported map key type", struct {
 			M map[io.Reader]bool
-		}{M: map[io.Reader]bool{io.Reader(nil): true}}, M{}, nil, `unsupported Go type io.Reader at M[<nil>]`},
+		}{M: map[io.Reader]bool{io.Reader(nil): true}}, M{}, nil, `M[<nil>]: unsupported Go type io.Reader`},
 		{"unsupported slice type", struct {
 			Sl []chan int
-		}{Sl: []chan int{make(chan int)}}, M{}, nil, `unsupported Go type chan int at Sl[0]`},
+		}{Sl: []chan int{make(chan int)}}, M{}, nil, `Sl[0]: unsupported Go type chan int`},
 		{"unsupported struct field type", struct {
 			Strct struct {
 				Ch chan int
 			}
-		}{Strct: struct{ Ch chan int }{Ch: make(chan int)}}, M{}, nil, `unsupported Go type chan int at Strct.Ch`},
+		}{Strct: struct{ Ch chan int }{Ch: make(chan int)}}, M{}, nil, `Strct.Ch: unsupported Go type chan int`},
 		{"unsupported embedded struct field type", struct {
 			ChanStruct
-		}{ChanStruct: ChanStruct{Ch: make(chan int)}}, M{}, nil, `unsupported Go type chan int at ChanStruct.Ch`},
+		}{ChanStruct: ChanStruct{Ch: make(chan int)}}, M{}, nil, `ChanStruct.Ch: unsupported Go type chan int`},
 		{"unsupported embedded field type", struct {
 			time.Duration
-		}{Duration: time.Hour}, M{}, nil, `embedded field at Duration of type time.Duration must be a struct or a pointer to a struct`},
+		}{Duration: time.Hour}, M{}, nil, `Duration: unsupported embedded Go type time.Duration`},
 
 		{"nil starlark value", struct{ V starlark.Value }{}, M{}, M{"V": starlark.None}, ``},
 		{"nil starlark value pointer", struct{ V *starlark.Value }{}, M{}, M{"V": starlark.None}, ``},
-		{"nil **starlark.Value", struct{ V **starlark.Value }{}, M{}, nil, `unsupported Go type **starlark.Value at V`},
+		{"nil **starlark.Value", struct{ V **starlark.Value }{}, M{}, nil, `V: unsupported Go type **starlark.Value`},
 		{"starlark value", struct{ V starlark.Value }{V: starlark.MakeInt(1)}, M{}, M{"V": starlark.MakeInt(1)}, ``},
 		{"starlark value pointer", struct{ V *starlark.Value }{V: starptr(starlark.String("a"))}, M{}, M{"V": starlark.String("a")}, ``},
-		{"**starlark.Value", struct{ V **starlark.Value }{V: star2ptr}, M{}, nil, `unsupported Go type **starlark.Value at V`},
-		{"wrapped starlark value", struct{ V dummyValue }{V: dummyValue{starlark.MakeInt(1)}}, M{}, nil, `embedded field at V.Value of type starlark.Value must be a struct or a pointer to a struct`},
+		{"**starlark.Value", struct{ V **starlark.Value }{V: star2ptr}, M{}, nil, `V: unsupported Go type **starlark.Value`},
+		{"wrapped starlark value", struct{ V dummyValue }{V: dummyValue{Value: starlark.MakeInt(1)}}, M{}, nil, `V.Value: unsupported embedded Go type starlark.Value`},
 	}
 
 	for _, c := range cases {

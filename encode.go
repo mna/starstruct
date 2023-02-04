@@ -1,6 +1,7 @@
 package starstruct
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -74,13 +75,35 @@ func ToStarlark(vals any, dst starlark.StringDict) error {
 		// conversion error.
 		dst = make(starlark.StringDict)
 	}
-	return walkStructEncode("", strct, stringDictValue{dst})
+
+	var e encoder
+	return e.encode(strct, dst)
+}
+
+type encoder struct {
+	errs    []error
+	maxErrs int
+}
+
+func (e *encoder) encode(strct reflect.Value, sdict starlark.StringDict) (err error) {
+	defer func() {
+		if v := recover(); v != nil {
+			if _, ok := v.(tooManyErrs); ok {
+				err = errors.Join(e.errs...)
+			} else {
+				panic(v)
+			}
+		}
+	}()
+
+	e.walkStructEncode("", strct, stringDictValue{sdict})
+	err = errors.Join(e.errs...)
+	return
 }
 
 // TODO: add support for custom encoders, via a func(path, srcVal) (starVal, bool, error)?
-// TODO: for both encoder/decoder, collect all errors? See if Go's new multi-error support could be useful.
 
-func walkStructEncode(path string, strct reflect.Value, dst dictGetSetter) error {
+func (e *encoder) walkStructEncode(path string, strct reflect.Value, dst dictGetSetter) {
 	strctTyp := strct.Type()
 	count := strctTyp.NumField()
 	for i := 0; i < count; i++ {
@@ -105,11 +128,10 @@ func walkStructEncode(path string, strct reflect.Value, dst dictGetSetter) error
 		if nm == "" {
 			if fldTyp.Anonymous {
 				if !isStructOrPtrType(fldTyp.Type) {
-					return fmt.Errorf("embedded field at %s of type %s must be a struct or a pointer to a struct", path, fldTyp.Type)
+					e.recordEmbeddedTypeErr(path, fld)
+					continue
 				}
-				if err := walkStructEncode(path, fld, dst); err != nil {
-					return err
-				}
+				e.walkStructEncode(path, fld, dst)
 				continue
 			}
 			nm = fldTyp.Name
@@ -119,29 +141,22 @@ func walkStructEncode(path string, strct reflect.Value, dst dictGetSetter) error
 		if rawOpts != "" {
 			opts = strings.Split(rawOpts, ",")
 		}
-		if err := toStarlarkValue(path, nm, fld, dst, opts); err != nil {
-			return err
-		}
+		e.toStarlarkValue(path, nm, fld, dst, opts)
 	}
-	return nil
 }
 
-func toStarlarkValue(path, dstName string, goVal reflect.Value, dst dictGetSetter, opts tagOpt) error {
+func (e *encoder) toStarlarkValue(path, dstName string, goVal reflect.Value, dst dictGetSetter, opts tagOpt) {
 	key := starlark.String(dstName)
-	goTyp := goVal.Type()
 
-	sval, err := convertGoValue(path, goVal, opts)
-	if err != nil {
-		return err
-	}
+	sval := e.convertGoValue(path, goVal, opts)
 	if err := dst.SetKey(key, sval); err != nil {
-		// don't think this error can happen (key is always a string)
-		return fmt.Errorf("failed to set value of key %s with type %s at %s: %w", dstName, goTyp, path, err)
+		// don't think this error can happen (key is always a string, create set is
+		// never immutable)
+		e.recordStarContainerErr(path, dst, key, sval, goVal, err)
 	}
-	return nil
 }
 
-func convertGoValue(path string, goVal reflect.Value, opts tagOpt) (starlark.Value, error) {
+func (e *encoder) convertGoValue(path string, goVal reflect.Value, opts tagOpt) starlark.Value {
 	goTyp := goVal.Type()
 
 	var isNil bool
@@ -159,70 +174,62 @@ func convertGoValue(path string, goVal reflect.Value, opts tagOpt) (starlark.Val
 	curOpt := opts.current()
 	switch {
 	case isNil:
-		return starlark.None, nil
+		return starlark.None
 	case goVal.Type() == starlarkValueType:
-		return goVal.Interface().(starlark.Value), nil
+		return goVal.Interface().(starlark.Value)
 	case goVal.Kind() == reflect.Bool:
-		return starlark.Bool(goVal.Bool()), nil
+		return starlark.Bool(goVal.Bool())
 	case goVal.Kind() == reflect.Float32 || goVal.Kind() == reflect.Float64:
-		return starlark.Float(goVal.Float()), nil
+		return starlark.Float(goVal.Float())
 	case goVal.Kind() >= reflect.Int && goVal.Kind() <= reflect.Int64:
-		return starlark.MakeInt64(goVal.Int()), nil
+		return starlark.MakeInt64(goVal.Int())
 	case goVal.Kind() >= reflect.Uint && goVal.Kind() <= reflect.Uintptr:
-		return starlark.MakeUint64(goVal.Uint()), nil
+		return starlark.MakeUint64(goVal.Uint())
 
 	case goVal.Kind() == reflect.String:
 		if curOpt == "asbytes" {
-			return starlark.Bytes(goVal.String()), nil
+			return starlark.Bytes(goVal.String())
 		}
-		return starlark.String(goVal.String()), nil
+		return starlark.String(goVal.String())
 
 	case isByteSliceType(goVal.Type()) && curOpt != "aslist" && curOpt != "astuple" && curOpt != "asset":
 		if curOpt == "asstring" {
-			return starlark.String(goVal.Bytes()), nil
+			return starlark.String(goVal.Bytes())
 		}
-		return starlark.Bytes(goVal.Bytes()), nil
+		return starlark.Bytes(goVal.Bytes())
 
 	case goVal.Kind() == reflect.Slice && curOpt != "astuple" && curOpt != "asset":
 		n := goVal.Len()
 		listVals := make([]starlark.Value, n)
 		for i := 0; i < n; i++ {
 			v := goVal.Index(i)
-			sval, err := convertGoValue(fmt.Sprintf("%s[%d]", path, i), v, opts.shift())
-			if err != nil {
-				return nil, err
-			}
+			sval := e.convertGoValue(fmt.Sprintf("%s[%d]", path, i), v, opts.shift())
 			listVals[i] = sval
 		}
-		return starlark.NewList(listVals), nil
+		return starlark.NewList(listVals)
 
 	case goVal.Kind() == reflect.Slice && curOpt == "astuple":
 		n := goVal.Len()
 		tupVals := make([]starlark.Value, n)
 		for i := 0; i < n; i++ {
 			v := goVal.Index(i)
-			sval, err := convertGoValue(fmt.Sprintf("%s[%d]", path, i), v, opts.shift())
-			if err != nil {
-				return nil, err
-			}
+			sval := e.convertGoValue(fmt.Sprintf("%s[%d]", path, i), v, opts.shift())
 			tupVals[i] = sval
 		}
-		return starlark.Tuple(tupVals), nil
+		return starlark.Tuple(tupVals)
 
 	case goVal.Kind() == reflect.Slice && curOpt == "asset":
 		n := goVal.Len()
 		set := starlark.NewSet(n)
 		for i := 0; i < n; i++ {
 			v := goVal.Index(i)
-			sval, err := convertGoValue(fmt.Sprintf("%s[%d]", path, i), v, opts.shift())
-			if err != nil {
-				return nil, err
-			}
+			path := fmt.Sprintf("%s[%d]", path, i)
+			sval := e.convertGoValue(path, v, opts.shift())
 			if err := set.Insert(sval); err != nil {
-				return nil, fmt.Errorf("failed to insert value into Set at %s: %w", path, err)
+				e.recordStarContainerErr(path, set, nil, sval, v, err)
 			}
 		}
-		return set, nil
+		return set
 
 	case isSetMapType(goVal.Type()):
 		n := goVal.Len()
@@ -233,26 +240,63 @@ func convertGoValue(path string, goVal reflect.Value, opts tagOpt) (starlark.Val
 			if !v.Bool() {
 				continue
 			}
-			sval, err := convertGoValue(fmt.Sprintf("%s[%v]", path, k), k, opts.shift())
-			if err != nil {
-				return nil, err
-			}
+			path := fmt.Sprintf("%s[%v]", path, k)
+			sval := e.convertGoValue(path, k, opts.shift())
 			if err := set.Insert(sval); err != nil {
-				return nil, fmt.Errorf("failed to insert value into Set at %s: %w", path, err)
+				e.recordStarContainerErr(path, set, nil, sval, k, err)
 			}
 		}
-		return set, nil
+		return set
 
 	case goVal.Kind() == reflect.Struct:
 		n := goVal.NumField()
 		dict := starlark.NewDict(n)
-		if err := walkStructEncode(path, goVal, dict); err != nil {
-			return nil, err
-		}
-		return dict, nil
+		e.walkStructEncode(path, goVal, dict)
+		return dict
 
 	default:
-		return nil, fmt.Errorf("unsupported Go type %s at %s", goTyp, path)
+		e.recordTypeErr(path, goVal)
+		// return None to avoid issues with invalid starlark values
+		return starlark.None
+	}
+}
+
+func (e *encoder) recordTypeErr(path string, goVal reflect.Value) {
+	err := &TypeError{
+		Op:    OpToStarlark,
+		Path:  path,
+		GoVal: goVal,
+	}
+	e.recordErr(err)
+}
+
+func (e *encoder) recordEmbeddedTypeErr(path string, goVal reflect.Value) {
+	err := &TypeError{
+		Op:       OpToStarlark,
+		Path:     path,
+		GoVal:    goVal,
+		Embedded: true,
+	}
+	e.recordErr(err)
+}
+
+func (e *encoder) recordStarContainerErr(path string, container, key, val starlark.Value, goVal reflect.Value, starErr error) {
+	err := &StarlarkContainerError{
+		Path:      path,
+		Container: container,
+		Key:       key,
+		Value:     val,
+		GoVal:     goVal,
+		Err:       starErr,
+	}
+	e.recordErr(err)
+}
+
+func (e *encoder) recordErr(err error) {
+	e.errs = append(e.errs, err)
+	if e.maxErrs > 0 && len(e.errs) >= e.maxErrs {
+		e.errs = append(e.errs, errors.New("maximum number of errors reached"))
+		panic(tooManyErrs{})
 	}
 }
 
