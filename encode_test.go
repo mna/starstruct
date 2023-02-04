@@ -178,7 +178,7 @@ func TestToStarlark(t *testing.T) {
 	}
 }
 
-func TestToStarlarkInvalidInput(t *testing.T) {
+func TestToStarlark_InvalidInput(t *testing.T) {
 	var s string
 
 	require.PanicsWithValue(t, `source value is not a struct or a pointer to a struct: string`, func() {
@@ -189,5 +189,57 @@ func TestToStarlarkInvalidInput(t *testing.T) {
 	})
 	require.PanicsWithValue(t, `source value is not a struct or a pointer to a struct: nil`, func() {
 		_ = ToStarlark(nil, nil)
+	})
+}
+
+func TestToStarlark_MaxToErrors(t *testing.T) {
+	type S struct {
+		I  int
+		F  func()
+		B  **bool
+		Ch chan byte
+	}
+	b := &truev
+
+	t.Run("too many", func(t *testing.T) {
+		err := ToStarlark(S{
+			I:  1,
+			F:  func() {},
+			B:  &b,
+			Ch: make(chan byte),
+		}, nil, MaxToErrors(2))
+
+		require.Error(t, err)
+		errs := err.(interface{ Unwrap() []error }).Unwrap()
+		require.Len(t, errs, 3)
+
+		var te *TypeError
+		require.ErrorAs(t, errs[0], &te)
+		require.Contains(t, errs[0].Error(), `F: unsupported Go type func()`)
+		require.ErrorAs(t, errs[1], &te)
+		require.Contains(t, errs[1].Error(), `B: unsupported Go type **bool`)
+		require.ErrorAs(t, errs[1], &te)
+		require.Contains(t, errs[2].Error(), `maximum number of errors reached`)
+	})
+
+	t.Run("exactly", func(t *testing.T) {
+		err := ToStarlark(S{
+			I:  1,
+			F:  func() {},
+			B:  &b,
+			Ch: make(chan byte),
+		}, nil, MaxToErrors(3))
+
+		require.Error(t, err)
+		errs := err.(interface{ Unwrap() []error }).Unwrap()
+		require.Len(t, errs, 3)
+
+		var te *TypeError
+		require.ErrorAs(t, errs[0], &te)
+		require.Contains(t, errs[0].Error(), `F: unsupported Go type func()`)
+		require.ErrorAs(t, errs[1], &te)
+		require.Contains(t, errs[1].Error(), `B: unsupported Go type **bool`)
+		require.ErrorAs(t, errs[1], &te)
+		require.Contains(t, errs[2].Error(), `Ch: unsupported Go type chan uint8`)
 	})
 }

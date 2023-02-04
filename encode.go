@@ -9,6 +9,20 @@ import (
 	"go.starlark.net/starlark"
 )
 
+// ToOption is the type of the encoding options that can be provided to the
+// ToStarlark function.
+type ToOption func(*encoder)
+
+// MaxToErrors sets the maximum numbers of errors to return. If too many errors
+// are reached, the error returned by ToStarlark will wrap max + 1 errors, the
+// last one being an error indicating that the maximum was reached. If max <=
+// 0, all errors will be returned.
+func MaxToErrors(max int) ToOption {
+	return func(e *encoder) {
+		e.maxErrs = max
+	}
+}
+
 // ToStarlark converts the values from the Go struct to corresponding Starlark
 // values stored into a destination Starlark string dictionary. Existing values
 // in dst, if any, are left untouched unless the Go struct conversion
@@ -58,7 +72,7 @@ import (
 // is nil, it proceeds with the conversion but the results of it will not be
 // visible to the caller (it can be used to validate the Go to Starlark
 // conversion).
-func ToStarlark(vals any, dst starlark.StringDict) error {
+func ToStarlark(vals any, dst starlark.StringDict, opts ...ToOption) error {
 	strct := reflect.ValueOf(vals)
 	oriVal := strct
 	for strct.Kind() == reflect.Pointer {
@@ -77,6 +91,9 @@ func ToStarlark(vals any, dst starlark.StringDict) error {
 	}
 
 	var e encoder
+	for _, opt := range opts {
+		opt(&e)
+	}
 	return e.encode(strct, dst)
 }
 
@@ -293,11 +310,11 @@ func (e *encoder) recordStarContainerErr(path string, container, key, val starla
 }
 
 func (e *encoder) recordErr(err error) {
-	e.errs = append(e.errs, err)
-	if e.maxErrs > 0 && len(e.errs) >= e.maxErrs {
+	if e.maxErrs > 0 && len(e.errs) == e.maxErrs {
 		e.errs = append(e.errs, errors.New("maximum number of errors reached"))
 		panic(tooManyErrs{})
 	}
+	e.errs = append(e.errs, err)
 }
 
 // returns true if t is a struct or pointer to struct.

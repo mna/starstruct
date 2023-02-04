@@ -356,23 +356,47 @@ func TestFromStarlark_MaxFromErrors(t *testing.T) {
 		Ch chan byte
 	}
 
-	var s S
-	err := FromStarlark(M{
-		"I":  starlark.MakeInt(1),
-		"B":  starlark.True,
-		"Ch": starlark.String("a"),
-		"S":  starlark.MakeInt(32),
-	}, &s, MaxFromErrors(2))
+	t.Run("too many", func(t *testing.T) {
+		var s S
+		err := FromStarlark(M{
+			"I":  starlark.MakeInt(1),
+			"B":  starlark.True,
+			"Ch": starlark.String("a"),
+			"S":  starlark.MakeInt(32),
+		}, &s, MaxFromErrors(2))
 
-	require.Error(t, err)
-	errs := err.(interface{ Unwrap() []error }).Unwrap()
-	require.Len(t, errs, 3)
+		require.Error(t, err)
+		errs := err.(interface{ Unwrap() []error }).Unwrap()
+		require.Len(t, errs, 3)
 
-	var te *TypeError
-	require.ErrorAs(t, errs[0], &te)
-	require.Contains(t, errs[0].Error(), `S: cannot convert Starlark int to Go type string`)
-	require.ErrorAs(t, errs[1], &te)
-	require.Contains(t, errs[1].Error(), `B: cannot convert Starlark bool to Go type **bool`)
-	require.ErrorAs(t, errs[1], &te)
-	require.Contains(t, errs[2].Error(), `maximum number of errors reached`)
+		var te *TypeError
+		require.ErrorAs(t, errs[0], &te)
+		require.Contains(t, errs[0].Error(), `S: cannot convert Starlark int to Go type string`)
+		require.ErrorAs(t, errs[1], &te)
+		require.Contains(t, errs[1].Error(), `B: cannot convert Starlark bool to Go type **bool`)
+		require.ErrorAs(t, errs[1], &te)
+		require.Contains(t, errs[2].Error(), `maximum number of errors reached`)
+	})
+
+	t.Run("exactly", func(t *testing.T) {
+		var s S
+		err := FromStarlark(M{
+			"I":  starlark.MakeInt(1),
+			"B":  starlark.True,
+			"Ch": starlark.String("a"),
+			"S":  starlark.MakeInt(32),
+		}, &s, MaxFromErrors(3))
+
+		require.Error(t, err)
+		errs := err.(interface{ Unwrap() []error }).Unwrap()
+		require.Len(t, errs, 3)
+
+		var te *TypeError
+		require.ErrorAs(t, errs[0], &te)
+		require.Contains(t, errs[0].Error(), `S: cannot convert Starlark int to Go type string`)
+		require.ErrorAs(t, errs[1], &te)
+		require.Contains(t, errs[1].Error(), `B: cannot convert Starlark bool to Go type **bool`)
+		require.ErrorAs(t, errs[1], &te)
+		require.Contains(t, errs[2].Error(), `Ch: cannot convert Starlark string to Go type chan uint8`)
+	})
 }

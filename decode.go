@@ -665,11 +665,11 @@ func (d *decoder) recordNumberErr(path string, starNum starlark.Value, goVal ref
 }
 
 func (d *decoder) recordErr(err error) {
-	d.errs = append(d.errs, err)
-	if d.maxErrs > 0 && len(d.errs) >= d.maxErrs {
+	if d.maxErrs > 0 && len(d.errs) == d.maxErrs {
 		d.errs = append(d.errs, errors.New("maximum number of errors reached"))
 		panic(tooManyErrs{})
 	}
+	d.errs = append(d.errs, err)
 }
 
 // nolint: unused
