@@ -35,7 +35,7 @@ type TypeError struct {
 	Embedded bool
 }
 
-// Error returns the error message of the starstruct error.
+// Error returns the error message of the starstruct type error.
 func (e *TypeError) Error() string {
 	if e.Op == OpFromStarlark {
 		if e.StarVal == nil {
@@ -74,12 +74,17 @@ const (
 // float32, starstruct checks if the absolute difference is smaller than
 // epsilon.
 type NumberError struct {
-	Reason  NumberFailReason
-	Path    string
-	StarNum starlark.Value // always Int or Float
-	GoVal   reflect.Value
+	// Reason indicates the cause of the number conversion failure.
+	Reason NumberFailReason
+	// Path indicates the Go struct path to the field in error.
+	Path string
+	// StarNum is the Starlark integer or float value associated with the error.
+	StarNum starlark.Value
+	// GoVal is the target Go value where the number was attempted to be stored.
+	GoVal reflect.Value
 }
 
+// Error returns the error message for the number conversion failure.
 func (e *NumberError) Error() string {
 	if e.Reason == NumCannotExactlyRepresent {
 		return fmt.Sprintf("%s: cannot assign Starlark %s to Go type %s: value cannot be exactly represented", e.Path, e.StarNum.Type(), e.GoVal.Type())
@@ -87,19 +92,34 @@ func (e *NumberError) Error() string {
 	return fmt.Sprintf("%s: cannot assign Starlark %s to Go type %s: value out of range", e.Path, e.StarNum.Type(), e.GoVal.Type())
 }
 
+// StarlarkContainerError indicates an error that occurred when inserting a
+// value into a Starlark container such as a dictionary or a set. It wraps the
+// actual error returned by Starlark and provides additional information about
+// where in the Go struct encoding the error occurred.
 type StarlarkContainerError struct {
-	Path      string
-	Container starlark.Value // Set, Dict, StringDict
-	Key       starlark.Value // String, only for Dict/StringDict
-	Value     starlark.Value // inserted value
-	GoVal     reflect.Value
-	Err       error
+	// Path indicates the Go struct path to the field in error.
+	Path string
+	// Container is the Starlark Set, Dict or StringDict that failed to insert
+	// the value.
+	Container starlark.Value
+	// Key is the key (always a string) at which the value was being inserted,
+	// nil if the container is not a Dict or StringDict.
+	Key starlark.Value
+	// Value is the value that failed to be inserted in the container.
+	Value starlark.Value
+	// GoVal is the Go value that converted to the Value being inserted.
+	GoVal reflect.Value
+	// Err is the error returned by Starlark when inserting into the container.
+	// The StarlarkContainerError wraps this error.
+	Err error
 }
 
+// Unwrap returns the underlying Starlark error.
 func (e *StarlarkContainerError) Unwrap() error {
 	return e.Err
 }
 
+// Error returns the error message for the Starlark container insertion.
 func (e *StarlarkContainerError) Error() string {
 	if e.Key == nil {
 		return fmt.Sprintf("%s: failed to insert Starlark %s into %s: %v", e.Path, e.Value.Type(), e.Container.Type(), e.Err)

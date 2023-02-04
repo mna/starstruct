@@ -93,8 +93,6 @@ func FromStarlark(vals starlark.StringDict, dst any, opts ...FromOption) error {
 type decoder struct {
 	errs    []error
 	maxErrs int
-	//decoded map[dictGetSetter]map[string]bool
-	//restDst map[dictGetSetter]reflect.Value
 }
 
 func (d *decoder) decode(strct reflect.Value, sdict starlark.StringDict) (err error) {
@@ -108,13 +106,11 @@ func (d *decoder) decode(strct reflect.Value, sdict starlark.StringDict) (err er
 		}
 	}()
 
-	d.walkStructDecode("", strct, stringDictValue{sdict})
+	d.setFieldDict("", strct, false, stringDictValue{sdict})
 	err = errors.Join(d.errs...)
 	return
 }
 
-// TODO: maybe add support for a "rest" map[string]starlark.Value for
-// dictionary values that were not decoded to fields?
 // TODO: add support for custom decoders, via a func(path, starVal, dstVal) (bool, error)?
 
 func (d *decoder) walkStructDecode(path string, strct reflect.Value, vals dictGetSetter) (didSet bool) {
@@ -461,6 +457,7 @@ func (d *decoder) setFieldDict(path string, fld reflect.Value, embedded bool, di
 		}
 		return didSet
 	}
+
 	didSet = d.walkStructDecode(path, fld, dict)
 	if didSet && ptrToStrct.Kind() == reflect.Pointer {
 		ptrToStrct.Set(fld.Addr())

@@ -333,18 +333,6 @@ func isTOrPtrTType(t, T reflect.Type) bool {
 	return t == T || (t.Kind() == reflect.Pointer && t.Elem() == T)
 }
 
-//func decodeStructTag(tag string) (nm string, opts tagOpt, err error) {
-//	if tag == "" {
-//		return "", nil, nil
-//	}
-//	if s := strings.TrimLeft(tag, "#"); len(tag) > len(s) {
-//		// the name is encoded in pounds
-//		pounds := len(tag) - len(s) // how many pound chars
-//		_ = pounds
-//	}
-//	panic("unimplemented")
-//}
-
 type tagOpt []string
 
 func (t tagOpt) current() string {
