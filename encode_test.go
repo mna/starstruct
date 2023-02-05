@@ -1,6 +1,7 @@
 package starstruct
 
 import (
+	"errors"
 	"io"
 	"reflect"
 	"testing"
@@ -274,6 +275,7 @@ func TestToStarlark_CustomConverter(t *testing.T) {
 	// - time.Time to string (yyyy-MM-dd)
 	// - time.Duration to int with tag option (number of seconds)
 	// - time.Time to int with tag option (unix epoch)
+	// - return error on *time.Duration
 	// - leaves anything else alone
 	customFn := func(path string, gov reflect.Value, opts []string) (starlark.Value, error) {
 		got := gov.Type()
@@ -293,6 +295,10 @@ func TestToStarlark_CustomConverter(t *testing.T) {
 			}
 			return starlark.String(d.String()), nil
 
+		case got.Kind() == reflect.Pointer && got.Elem() == durt:
+			// *time.Duration
+			return nil, errors.New("unsupported *time.Duration")
+
 		default:
 			return nil, nil
 		}
@@ -300,7 +306,7 @@ func TestToStarlark_CustomConverter(t *testing.T) {
 
 	type D struct {
 		D1 time.Duration
-		D2 *time.Duration  `starlark:"-"`
+		D2 *time.Duration
 		Dn time.Duration   `starlark:"-"`
 		D3 time.Duration   `starlark:"d3,asint"`
 		Ds []time.Duration `starlark:"ds,aslist,asint"`
@@ -335,12 +341,20 @@ func TestToStarlark_CustomConverter(t *testing.T) {
 			D1: 9 * time.Second,
 		},
 	}, m, CustomToConverter(customFn))
-	require.NoError(t, err)
+	require.Error(t, err)
+	errs := err.(interface{ Unwrap() []error }).Unwrap()
+	require.Len(t, errs, 2)
+	var ce *CustomConvError
+	require.ErrorAs(t, errs[0], &ce)
+	require.Equal(t, "D.D2", ce.Path)
+	require.ErrorAs(t, errs[1], &ce)
+	require.Equal(t, "N.D2", ce.Path)
 
 	// starlark dicts cannot be reliably compared, so the "N" field is removed and
 	// compared separately (as a Go map) afterwards.
 	want := M{
 		"D1": starlark.String("3s"),
+		"D2": starlark.None,
 		"d3": starlark.MakeInt(6),
 		"ds": list(starlark.MakeInt(7), starlark.MakeInt(8)),
 		"T1": starlark.String("2022-02-02"),
@@ -349,6 +363,7 @@ func TestToStarlark_CustomConverter(t *testing.T) {
 		"ts": tup(starlark.MakeInt64(date(2022, 5, 5).Unix()), starlark.MakeInt64(date(2022, 6, 6).Unix())),
 		"N": dict(M{
 			"D1": starlark.String("9s"),
+			"D2": starlark.None,
 			"d3": starlark.MakeInt(0),
 			"ds": starlark.None,
 		}),
