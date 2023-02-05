@@ -2,6 +2,7 @@ package starstruct
 
 import (
 	"io"
+	"reflect"
 	"testing"
 	"time"
 
@@ -161,6 +162,15 @@ func TestToStarlark(t *testing.T) {
 		{"starlark value pointer", struct{ V *starlark.Value }{V: starptr(starlark.String("a"))}, M{}, M{"V": starlark.String("a")}, ``},
 		{"**starlark.Value", struct{ V **starlark.Value }{V: star2ptr}, M{}, nil, `V: unsupported Go type **starlark.Value`},
 		{"wrapped starlark value", struct{ V dummyValue }{V: dummyValue{Value: starlark.MakeInt(1)}}, M{}, nil, `V.Value: unsupported embedded Go type starlark.Value`},
+
+		{"myBool", struct{ B myBool }{B: true}, M{}, M{"B": starlark.Bool(true)}, ""},
+		{"*myBool", struct{ B *myBool }{B: myTruePtr}, M{}, M{"B": starlark.Bool(true)}, ""},
+		{"myString", struct{ S myString }{S: "abc"}, M{}, M{"S": starlark.String("abc")}, ""},
+		{"*myString", struct{ S *myString }{S: (*myString)(sptr("def"))}, M{}, M{"S": starlark.String("def")}, ""},
+		{"myInt", struct{ I myInt }{I: 123}, M{}, M{"I": starlark.MakeInt(123)}, ""},
+		{"*myInt", struct{ I *myInt }{I: (*myInt)(iptr(456))}, M{}, M{"I": starlark.MakeInt(456)}, ""},
+		{"myFloat", struct{ F myFloat }{F: 123}, M{}, M{"F": starlark.Float(123)}, ""},
+		{"*myFloat", struct{ F *myFloat }{F: (*myFloat)(fptr(456))}, M{}, M{"F": starlark.Float(456)}, ""},
 	}
 
 	for _, c := range cases {
@@ -253,4 +263,100 @@ func TestToStarlark_DuplicateDest(t *testing.T) {
 	err := ToStarlark(S{I: 123, Int: iptr(456)}, m)
 	require.NoError(t, err)
 	require.Equal(t, M{"int": starlark.MakeInt(456)}, m)
+}
+
+func TestToStarlark_CustomConverter(t *testing.T) {
+	timet := reflect.TypeOf(time.Now())
+	durt := reflect.TypeOf(time.Second)
+
+	// custom converter that supports:
+	// - time.Duration to string
+	// - time.Time to string (yyyy-MM-dd)
+	// - time.Duration to int with tag option (number of seconds)
+	// - time.Time to int with tag option (unix epoch)
+	// - leaves anything else alone
+	customFn := func(path string, gov reflect.Value, opts []string) (starlark.Value, error) {
+		got := gov.Type()
+
+		switch {
+		case got == timet:
+			t := gov.Interface().(time.Time)
+			if len(opts) > 0 && opts[0] == "asint" {
+				return starlark.MakeInt64(t.Unix()), nil
+			}
+			return starlark.String(t.Format(time.DateOnly)), nil
+
+		case got == durt:
+			d := gov.Interface().(time.Duration)
+			if len(opts) > 0 && opts[0] == "asint" {
+				return starlark.MakeInt(int(d / time.Second)), nil
+			}
+			return starlark.String(d.String()), nil
+
+		default:
+			return nil, nil
+		}
+	}
+
+	type D struct {
+		D1 time.Duration
+		D2 *time.Duration  `starlark:"-"`
+		Dn time.Duration   `starlark:"-"`
+		D3 time.Duration   `starlark:"d3,asint"`
+		Ds []time.Duration `starlark:"ds,aslist,asint"`
+	}
+	type T struct {
+		T1 time.Time
+		T2 *time.Time
+		T3 time.Time   `starlark:"t3,asint"`
+		Ts []time.Time `starlark:"ts,astuple,asint"`
+	}
+	type S struct {
+		D
+		T
+		N D
+	}
+	m := M{}
+	err := ToStarlark(S{
+		D: D{
+			D1: 3 * time.Second,
+			D2: durptr(4 * time.Second),
+			Dn: 5 * time.Second,
+			D3: 6 * time.Second,
+			Ds: []time.Duration{7 * time.Second, 8 * time.Second},
+		},
+		T: T{
+			T1: date(2022, 2, 2),
+			T2: tptr(date(2022, 3, 3)),
+			T3: date(2022, 4, 4),
+			Ts: []time.Time{date(2022, 5, 5), date(2022, 6, 6)},
+		},
+		N: D{
+			D1: 9 * time.Second,
+		},
+	}, m, CustomToConverter(customFn))
+	require.NoError(t, err)
+
+	// starlark dicts cannot be reliably compared, so the "N" field is removed and
+	// compared separately (as a Go map) afterwards.
+	want := M{
+		"D1": starlark.String("3s"),
+		"d3": starlark.MakeInt(6),
+		"ds": list(starlark.MakeInt(7), starlark.MakeInt(8)),
+		"T1": starlark.String("2022-02-02"),
+		"T2": dict(M{}),
+		"t3": starlark.MakeInt64(date(2022, 4, 4).Unix()),
+		"ts": tup(starlark.MakeInt64(date(2022, 5, 5).Unix()), starlark.MakeInt64(date(2022, 6, 6).Unix())),
+		"N": dict(M{
+			"D1": starlark.String("9s"),
+			"d3": starlark.MakeInt(0),
+			"ds": starlark.None,
+		}),
+	}
+
+	wantN, gotN := want["N"], m["N"]
+	delete(want, "N")
+	delete(m, "N")
+	require.Equal(t, want, m)
+	require.Equal(t, toStrDict(wantN.(*starlark.Dict)), toStrDict(gotN.(*starlark.Dict)))
 }

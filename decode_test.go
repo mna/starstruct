@@ -493,6 +493,7 @@ func TestFromStarlark_CustomConverter(t *testing.T) {
 		D1 time.Duration
 		D2 *time.Duration
 		Dn time.Duration `starlark:"-"`
+		Ds []time.Duration
 		B  bool
 	}
 	type T struct {
@@ -518,6 +519,7 @@ func TestFromStarlark_CustomConverter(t *testing.T) {
 		"D1": starlark.MakeInt(25),
 		"D2": starlark.MakeInt(30),
 		"Dn": starlark.String("1s"),
+		"Ds": list(starlark.MakeInt(33), starlark.String("2s")),
 		"B":  starlark.True,
 		"T1": starlark.String("2022-01-02"),
 		"T2": starlark.MakeInt(1675613116),
@@ -534,10 +536,11 @@ func TestFromStarlark_CustomConverter(t *testing.T) {
 			D1: 25 * time.Second,
 			D2: durptr(30),
 			Dn: time.Minute,
+			Ds: []time.Duration{33 * time.Second, 2 * time.Second},
 			B:  true,
 		},
 		T: &T{
-			T1: time.Date(2022, 1, 2, 0, 0, 0, 0, time.UTC),
+			T1: date(2022, 1, 2),
 			T3: time.Unix(1672578000, 0),
 			S:  "a",
 		},
