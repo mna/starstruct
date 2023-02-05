@@ -3,6 +3,7 @@ package starstruct
 import (
 	"math"
 	"math/big"
+	"time"
 
 	"go.starlark.net/starlark"
 )
@@ -44,8 +45,21 @@ func iptr(i int) *int                          { return &i }
 func uptr(i uint) *uint                        { return &i }
 func fptr(f float64) *float64                  { return &f }
 func starptr(v starlark.Value) *starlark.Value { return &v }
+func durptr(d time.Duration) *time.Duration    { return &d }
+
+type dummyValue struct {
+	starlark.Value
+}
+
+func (d dummyValue) Type() string { return "dummy" }
+
+type myInt int
+type myString string
+type myFloat float64
+type myBool bool
 
 var (
 	truev, falsev = true, false
+	myTruePtr     = (*myBool)(&truev)
 	tooBig        = big.NewInt(1).Add(big.NewInt(1).SetUint64(math.MaxUint64), big.NewInt(1))
 )

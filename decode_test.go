@@ -1,6 +1,8 @@
 package starstruct
 
 import (
+	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"testing"
@@ -9,12 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.starlark.net/starlark"
 )
-
-type dummyValue struct {
-	starlark.Value
-}
-
-func (d dummyValue) Type() string { return "dummy" }
 
 func TestFromStarlark(t *testing.T) {
 	type StrctBool struct {
@@ -87,6 +83,17 @@ func TestFromStarlark(t *testing.T) {
 		NotStar         dummyValue
 		ExpandedStar    starlark.Callable
 		ExpandedStarPtr *starlark.Callable
+	}
+
+	type StrctMy struct {
+		Int       myInt
+		Float     myFloat
+		String    myString
+		Bool      myBool
+		IntPtr    *myInt
+		FloatPtr  *myFloat
+		StringPtr *myString
+		BoolPtr   *myBool
 	}
 
 	cases := []struct {
@@ -309,6 +316,19 @@ func TestFromStarlark(t *testing.T) {
 			StrctDict{StrctNums: &StrctNums{I64: 1}, StrctBool: StrctBool{B: true}},
 			`StrctNums.U8: cannot assign Starlark int to Go type uint8: value out of range
 StrctStr.S2ptr: cannot convert Starlark string to Go type **string`},
+
+		{"true into myBool", M{"bool": starlark.Bool(true)}, &StrctMy{}, StrctMy{Bool: true}, ""},
+		{"true into *myBool", M{"boolptr": starlark.Bool(true)}, &StrctMy{}, StrctMy{BoolPtr: myTruePtr}, ""},
+		{"string into myString", M{"string": starlark.String("abc")}, &StrctMy{}, StrctMy{String: "abc"}, ""},
+		{"string into *myString", M{"stringptr": starlark.String("def")}, &StrctMy{}, StrctMy{StringPtr: (*myString)(sptr("def"))}, ""},
+		{"int into myInt", M{"int": starlark.MakeInt(-123)}, &StrctMy{}, StrctMy{Int: -123}, ""},
+		{"int into *myInt", M{"intptr": starlark.MakeInt(456)}, &StrctMy{}, StrctMy{IntPtr: (*myInt)(iptr(456))}, ""},
+		{"int into myFloat", M{"float": starlark.MakeInt(-123)}, &StrctMy{}, StrctMy{Float: -123}, ""},
+		{"int into *myFloat", M{"floatptr": starlark.MakeInt(456)}, &StrctMy{}, StrctMy{FloatPtr: (*myFloat)(fptr(456))}, ""},
+		{"float into myFloat", M{"float": starlark.Float(-123)}, &StrctMy{}, StrctMy{Float: -123}, ""},
+		{"float into *myFloat", M{"floatptr": starlark.Float(456)}, &StrctMy{}, StrctMy{FloatPtr: (*myFloat)(fptr(456))}, ""},
+		{"float into myInt", M{"int": starlark.Float(-123)}, &StrctMy{}, StrctMy{Int: -123}, ""},
+		{"float into *myInt", M{"intptr": starlark.Float(456)}, &StrctMy{}, StrctMy{IntPtr: (*myInt)(iptr(456))}, ""},
 	}
 
 	for _, c := range cases {
@@ -410,4 +430,128 @@ func TestFromStarlark_DuplicateTarget(t *testing.T) {
 	err := FromStarlark(M{"int": starlark.MakeInt(123)}, &s)
 	require.NoError(t, err)
 	require.Equal(t, S{I: 123, Int: iptr(123)}, s)
+}
+
+func TestFromStarlark_CustomConverter(t *testing.T) {
+	timet := reflect.TypeOf(time.Now())
+	durt := reflect.TypeOf(time.Second)
+
+	// custom converter that supports:
+	// - string to time.Duration
+	// - string to time.Time (yyyy-MM-dd)
+	// - int to time.Duration (number of seconds)
+	// - int to time.Time (unix epoch)
+	// - leaves anything else alone
+	customFn := func(path string, starv starlark.Value, gov reflect.Value) (bool, error) {
+		got := gov.Type()
+		if got != timet && got != durt {
+			return false, nil
+		}
+
+		switch v := starv.(type) {
+		case starlark.String:
+			if got == timet {
+				t, err := time.Parse(time.DateOnly, string(v))
+				if err != nil {
+					return false, err
+				}
+				gov.Set(reflect.ValueOf(t))
+				return true, nil
+			}
+
+			d, err := time.ParseDuration(string(v))
+			if err != nil {
+				return false, err
+			}
+			gov.Set(reflect.ValueOf(d))
+			return true, nil
+
+		case starlark.Int:
+			i, ok := v.Int64()
+			if got == timet {
+				if !ok {
+					return false, errors.New("integer out of range for unix epoch")
+				}
+				t := time.Unix(i, 0)
+				gov.Set(reflect.ValueOf(t))
+				return true, nil
+			}
+
+			if !ok {
+				return false, errors.New("integer out of range for duration")
+			}
+			d := time.Second * time.Duration(i)
+			gov.Set(reflect.ValueOf(d))
+			return true, nil
+
+		default:
+			return false, fmt.Errorf("unsupported starlark type: %s", starv.Type())
+		}
+	}
+
+	type D struct {
+		D1 time.Duration
+		D2 *time.Duration
+		Dn time.Duration `starlark:"-"`
+		B  bool
+	}
+	type T struct {
+		T1 time.Time
+		T2 *time.Time
+		T3 time.Time
+		T4 time.Time
+		S  string
+	}
+	type S struct {
+		D3 time.Duration
+		D
+		*T
+		N D
+	}
+
+	var s S
+	s.D.D1 = time.Hour
+	s.D.Dn = time.Minute
+
+	err := FromStarlark(M{
+		"D3": starlark.String("12s"),
+		"D1": starlark.MakeInt(25),
+		"D2": starlark.MakeInt(30),
+		"Dn": starlark.String("1s"),
+		"B":  starlark.True,
+		"T1": starlark.String("2022-01-02"),
+		"T2": starlark.MakeInt(1675613116),
+		"T3": starlark.MakeInt(1672578000),
+		"T4": starlark.String("not-a-date"),
+		"S":  starlark.String("a"),
+		"N":  dict(M{"D1": starlark.String("not-a-dur")}),
+	}, &s, CustomFromConverter(customFn))
+	require.Error(t, err)
+
+	require.Equal(t, S{
+		D3: 12 * time.Second,
+		D: D{
+			D1: 25 * time.Second,
+			D2: durptr(30),
+			Dn: time.Minute,
+			B:  true,
+		},
+		T: &T{
+			T1: time.Date(2022, 1, 2, 0, 0, 0, 0, time.UTC),
+			T3: time.Unix(1672578000, 0),
+			S:  "a",
+		},
+		N: D{},
+	}, s)
+
+	var convErr *CustomConvError
+	var typeErr *TypeError
+	errs := err.(interface{ Unwrap() []error }).Unwrap()
+	require.Len(t, errs, 3)
+	require.ErrorAs(t, errs[0], &typeErr)
+	require.Equal(t, "T.T2", typeErr.Path)
+	require.ErrorAs(t, errs[1], &convErr)
+	require.Equal(t, "T.T4", convErr.Path)
+	require.ErrorAs(t, errs[2], &convErr)
+	require.Equal(t, "N.D1", convErr.Path)
 }

@@ -312,6 +312,10 @@ func (d *decoder) setFieldInt(path string, fld reflect.Value, i starlark.Int) {
 	switch fld.Kind() {
 	case reflect.Float32, reflect.Float64:
 		f, _ := starlark.AsFloat(i)
+		if fld.OverflowFloat(f) {
+			d.recordNumberErr(path, i, fld, NumCannotExactlyRepresent)
+			return
+		}
 		integer, frac := math.Modf(f)
 		if frac != 0 {
 			// this cannot happen
@@ -334,11 +338,30 @@ func (d *decoder) setFieldInt(path string, fld reflect.Value, i starlark.Int) {
 			return
 		}
 		fld.SetFloat(f)
-	default:
-		if err := starlark.AsInt(i, fld.Addr().Interface()); err != nil {
+
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		i64, ok := i.Int64()
+		if !ok {
 			d.recordNumberErr(path, i, fld, NumOutOfRange)
 			return
 		}
+		if fld.OverflowInt(i64) {
+			d.recordNumberErr(path, i, fld, NumOutOfRange)
+			return
+		}
+		fld.SetInt(i64)
+
+	default:
+		u64, ok := i.Uint64()
+		if !ok {
+			d.recordNumberErr(path, i, fld, NumOutOfRange)
+			return
+		}
+		if fld.OverflowUint(u64) {
+			d.recordNumberErr(path, i, fld, NumOutOfRange)
+			return
+		}
+		fld.SetUint(u64)
 	}
 }
 
