@@ -55,8 +55,10 @@ func uptr(i uint) *uint                        { return &i }
 func fptr(f float64) *float64                  { return &f }
 func starptr(v starlark.Value) *starlark.Value { return &v }
 func durptr(d time.Duration) *time.Duration    { return &d }
-func date(y, m, d int) time.Time               { return time.Date(y, time.Month(m), d, 0, 0, 0, 0, time.UTC) }
 func tptr(t time.Time) *time.Time              { return &t }
+
+// nolint: unparam
+func date(y, m, d int) time.Time { return time.Date(y, time.Month(m), d, 0, 0, 0, 0, time.UTC) }
 
 type dummyValue struct {
 	starlark.Value
