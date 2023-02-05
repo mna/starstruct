@@ -17,6 +17,31 @@ const (
 	OpFromStarlark ConvOp = "from"
 )
 
+// CustomConvError wraps an error that occurred in a custom converter with
+// additional information about the values and struct path involved.
+type CustomConvError struct {
+	// Op indicates if this is in a FromStarlark or ToStarlark call.
+	Op ConvOp
+	// Path indicates the Go struct path to the field in error.
+	Path string
+	// StarVal is the starlark value in a From conversion, nil otherwise.
+	StarVal starlark.Value
+	// GoVal is the Go value associated with the error.
+	GoVal reflect.Value
+	// Err is the error as returned by the custom converter.
+	Err error
+}
+
+// Unwrap returns the underlying custom converter error.
+func (e *CustomConvError) Unwrap() error {
+	return e.Err
+}
+
+// Error returns the error message for the custom conversion error.
+func (e *CustomConvError) Error() string {
+	return fmt.Sprintf("%s: custom converter error: %v", e.Path, e.Err)
+}
+
 // TypeError represents a starstruct conversion error. Errors returned from
 // ToStarlark and FromStarlark may wrap errors of this type - that is, the
 // returned error is created by using the Go standard library errors.Join

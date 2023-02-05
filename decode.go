@@ -24,6 +24,25 @@ func MaxFromErrors(max int) FromOption {
 	}
 }
 
+// CustomFromConverter allows specifying a custom converter from a starlark
+// value to a Go type. The function receives the Go struct path, the starlark
+// value to convert and the target Go value where to store the result of the
+// conversion as arguments. It returns whether it did convert the value and an
+// optional error.
+//
+// If an error is returned, it will be wrapped in a CustomConvError and will be
+// returned as part of the errors collected in the call to FromStarlark, and the
+// conversion of that starlark value is skipped.
+//
+// If it returns true for the didConvert boolean return value, the starlark value
+// is considered converted and is skipped. Otherwise, if it returns false and
+// a nil error, the standard conversion is applied to the starlark value.
+func CustomFromConverter(fn func(path string, starVal starlark.Value, goVal reflect.Value) (didConvert bool, err error)) FromOption {
+	return func(d *decoder) {
+		d.custom = fn
+	}
+}
+
 // FromStarlark loads the starlark values from vals into a destination Go
 // struct. It supports the following data types from Starlark to Go, and all Go
 // types can also be a pointer to that type:
@@ -41,9 +60,12 @@ func MaxFromErrors(max int) FromOption {
 // In addition to those conversions, if the Go type is starlark.Value (or a
 // pointer to that type), then the starlark value is assigned as-is.
 //
+// Additional conversions can be supported via a custom converter (see
+// CustomFromConverter).
+//
 // It panics if dst is not a non-nil pointer to an addressable and settable
-// struct. If a target field does not exist in the starlark dictionary, it is
-// unmodified.
+// struct. If a target Go field does have a matching key in the starlark
+// dictionary, it is unmodified.
 //
 // Decoding into a slice follows the same behavior as JSON umarshaling: it
 // resets the slice length to zero and then appends each element to the slice.
@@ -93,6 +115,7 @@ func FromStarlark(vals starlark.StringDict, dst any, opts ...FromOption) error {
 type decoder struct {
 	errs    []error
 	maxErrs int
+	custom  func(string, starlark.Value, reflect.Value) (bool, error)
 }
 
 func (d *decoder) decode(strct reflect.Value, sdict starlark.StringDict) (err error) {
@@ -110,8 +133,6 @@ func (d *decoder) decode(strct reflect.Value, sdict starlark.StringDict) (err er
 	err = errors.Join(d.errs...)
 	return
 }
-
-// TODO: add support for custom decoders, via a func(path, starVal, dstVal) (bool, error)?
 
 func (d *decoder) walkStructDecode(path string, strct reflect.Value, vals dictGetSetter) (didSet bool) {
 	strctTyp := strct.Type()
@@ -167,6 +188,17 @@ func (d *decoder) walkStructDecode(path string, strct reflect.Value, vals dictGe
 }
 
 func (d *decoder) fromStarlarkValue(path string, starVal starlark.Value, dst reflect.Value) {
+	if fn := d.custom; fn != nil {
+		ok, err := fn(path, starVal, dst)
+		if err != nil {
+			d.recordCustomConvErr(path, starVal, dst, err)
+			return
+		}
+		if ok {
+			return
+		}
+	}
+
 	// if destination is starlark.Value interface (or a pointer to it), assign
 	// it directly, as-is.
 	if t := dst.Type(); isTOrPtrTType(t, starlarkValueType) {
@@ -647,6 +679,17 @@ func (d *decoder) recordEmbeddedTypeErr(path string, starVal starlark.Value, goV
 		StarVal:  starVal,
 		GoVal:    goVal,
 		Embedded: true,
+	}
+	d.recordErr(err)
+}
+
+func (d *decoder) recordCustomConvErr(path string, starVal starlark.Value, goVal reflect.Value, e error) {
+	err := &CustomConvError{
+		Op:      OpFromStarlark,
+		Path:    path,
+		StarVal: starVal,
+		GoVal:   goVal,
+		Err:     e,
 	}
 	d.recordErr(err)
 }

@@ -23,6 +23,25 @@ func MaxToErrors(max int) ToOption {
 	}
 }
 
+// CustomToConverter allows specifying a custom converter from a Go value to a
+// starlark value. The function receives the Go struct path, the Go value as a
+// reflect.Value and the struct tag options applied to that Go value (if any)
+// as arguments. It returns the resulting starlark value and an optional
+// error.
+//
+// If an error is returned, it will be wrapped in a CustomConvError and will
+// be returned as part of the errors collected in the call to ToStarlark, and
+// the conversion of that Go value is skipped.
+//
+// If it returns a non-nil starlark value, the Go value is considered
+// converted and is skipped. Otherwise, if it returns a nil value and a nil
+// error, the standard conversion is applied to the Go value.
+func CustomToConverter(fn func(path string, goVal reflect.Value, tagOpts []string) (starlark.Value, error)) ToOption {
+	return func(e *encoder) {
+		e.custom = fn
+	}
+}
+
 // ToStarlark converts the values from the Go struct to corresponding Starlark
 // values stored into a destination Starlark string dictionary. Existing values
 // in dst, if any, are left untouched unless the Go struct conversion
@@ -42,6 +61,9 @@ func MaxToErrors(max int) ToOption {
 //
 // In addition to those conversions, if the Go type is starlark.Value (or a
 // pointer to that type), then the starlark value is transferred as-is.
+//
+// Additional conversions can be supported via a custom converter (see
+// CustomToConverter).
 //
 // Conversion can be further controlled by using struct tags. Besides the
 // naming of the starlark variable, a comma-separated argument can be provided
@@ -100,6 +122,7 @@ func ToStarlark(vals any, dst starlark.StringDict, opts ...ToOption) error {
 type encoder struct {
 	errs    []error
 	maxErrs int
+	custom  func(string, reflect.Value, []string) (starlark.Value, error)
 }
 
 func (e *encoder) encode(strct reflect.Value, sdict starlark.StringDict) (err error) {
@@ -117,8 +140,6 @@ func (e *encoder) encode(strct reflect.Value, sdict starlark.StringDict) (err er
 	err = errors.Join(e.errs...)
 	return
 }
-
-// TODO: add support for custom encoders, via a func(path, srcVal) (starVal, bool, error)?
 
 func (e *encoder) walkStructEncode(path string, strct reflect.Value, dst dictGetSetter) {
 	strctTyp := strct.Type()
@@ -174,6 +195,17 @@ func (e *encoder) toStarlarkValue(path, dstName string, goVal reflect.Value, dst
 }
 
 func (e *encoder) convertGoValue(path string, goVal reflect.Value, opts tagOpt) starlark.Value {
+	if fn := e.custom; fn != nil {
+		starVal, err := fn(path, goVal, opts)
+		if err != nil {
+			e.recordCustomConvErr(path, goVal, err)
+			return starlark.None
+		}
+		if starVal != nil {
+			return starVal
+		}
+	}
+
 	goTyp := goVal.Type()
 
 	var isNil bool
@@ -305,6 +337,16 @@ func (e *encoder) recordStarContainerErr(path string, container, key, val starla
 		Value:     val,
 		GoVal:     goVal,
 		Err:       starErr,
+	}
+	e.recordErr(err)
+}
+
+func (e *encoder) recordCustomConvErr(path string, goVal reflect.Value, ce error) {
+	err := &CustomConvError{
+		Op:    OpToStarlark,
+		Path:  path,
+		GoVal: goVal,
+		Err:   ce,
 	}
 	e.recordErr(err)
 }
